@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use App\Models\Installation;
 use App\Models\InstallationModule;
 use App\Models\Module;
+use App\Services\AuditLogService;
+use DateTimeInterface;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -14,6 +16,10 @@ use Inertia\Response;
 
 class InstallationModuleController extends Controller
 {
+    public function __construct(
+        private readonly AuditLogService $auditLogService,
+    ) {}
+
     /**
      * Display a listing of the resource.
      */
@@ -51,6 +57,12 @@ class InstallationModuleController extends Controller
         $validated = $request->validate($this->validationRules($request));
 
         $installationModule = InstallationModule::create($validated);
+
+        $this->auditLogService->record(
+            'installation_module.created',
+            auditable: $installationModule,
+            newValues: $this->installationModuleAuditSnapshot($installationModule),
+        );
 
         return redirect()
             ->route('installation-modules.show', $installationModule)
@@ -91,7 +103,16 @@ class InstallationModuleController extends Controller
     {
         $validated = $request->validate($this->validationRules($request, $installationModule));
 
+        $oldValues = $this->installationModuleAuditSnapshot($installationModule);
+
         $installationModule->update($validated);
+
+        $this->auditLogService->record(
+            'installation_module.updated',
+            auditable: $installationModule,
+            oldValues: $oldValues,
+            newValues: $this->installationModuleAuditSnapshot($installationModule->fresh()),
+        );
 
         return redirect()
             ->route('installation-modules.show', $installationModule)
@@ -103,11 +124,46 @@ class InstallationModuleController extends Controller
      */
     public function destroy(InstallationModule $installationModule): RedirectResponse
     {
+        $oldValues = $this->installationModuleAuditSnapshot($installationModule);
+
         $installationModule->delete();
+
+        $this->auditLogService->record(
+            'installation_module.deleted',
+            oldValues: $oldValues,
+        );
 
         return redirect()
             ->route('installation-modules.index')
             ->with('success', 'Affectation du module supprimée avec succès.');
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function installationModuleAuditSnapshot(InstallationModule $installationModule): array
+    {
+        $snapshot = ['id' => $installationModule->id];
+
+        foreach ([
+            'installation_id',
+            'module_id',
+            'status',
+            'version',
+            'activated_at',
+            'deactivated_at',
+            'notes',
+        ] as $attribute) {
+            $value = $installationModule->getAttribute($attribute);
+
+            if ($value instanceof DateTimeInterface) {
+                $snapshot[$attribute] = $value->format('Y-m-d H:i:s');
+            } else {
+                $snapshot[$attribute] = $value;
+            }
+        }
+
+        return $snapshot;
     }
 
     /**
