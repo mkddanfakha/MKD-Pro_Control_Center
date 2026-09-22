@@ -1,16 +1,27 @@
 <script setup>
 import AdminLayout from '@/Layouts/AdminLayout.vue';
-import { Head, Link, usePage } from '@inertiajs/vue3';
-import { computed } from 'vue';
+import { Head, Link, router, usePage } from '@inertiajs/vue3';
+import { computed, ref } from 'vue';
 
 const props = defineProps({
     payment: {
         type: Object,
         required: true,
     },
+    canRenewSubscription: {
+        type: Boolean,
+        default: false,
+    },
+    renewalPreview: {
+        type: Object,
+        default: null,
+    },
 });
 
 const page = usePage();
+
+const showRenewConfirm = ref(false);
+const renewing = ref(false);
 
 const installationSubtitle = computed(() => {
     const installation = props.payment.subscription?.installation;
@@ -139,6 +150,22 @@ function installationStatusClass(status) {
     return classes[status] ?? 'bg-gray-100 text-gray-600 ring-gray-200';
 }
 
+function confirmRenewSubscription() {
+    if (renewing.value) {
+        return;
+    }
+
+    renewing.value = true;
+
+    router.post(`/payments/${props.payment.id}/renew-subscription`, {}, {
+        preserveScroll: true,
+        onFinish: () => {
+            renewing.value = false;
+            showRenewConfirm.value = false;
+        },
+    });
+}
+
 function paymentMethodLabel(method) {
     const labels = {
         wave: 'Wave',
@@ -166,6 +193,99 @@ function paymentMethodLabel(method) {
                 role="status"
             >
                 {{ page.flash.success }}
+            </div>
+
+            <div
+                v-if="page.flash.error"
+                class="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-800"
+                role="alert"
+            >
+                {{ page.flash.error }}
+            </div>
+
+            <div
+                v-if="showRenewConfirm"
+                class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="renew-subscription-title"
+                @click.self="showRenewConfirm = false"
+            >
+                <div class="w-full max-w-lg rounded-xl bg-white p-6 shadow-lg ring-1 ring-gray-200">
+                    <h2
+                        id="renew-subscription-title"
+                        class="text-lg font-semibold text-gray-900"
+                    >
+                        Renouveler l'abonnement
+                    </h2>
+
+                    <p class="mt-3 text-sm text-gray-600">
+                        Confirmez le renouvellement de l'abonnement à partir de ce paiement.
+                    </p>
+
+                    <dl class="mt-4 space-y-3 text-sm">
+                        <div>
+                            <dt class="font-medium text-gray-500">
+                                Installation
+                            </dt>
+                            <dd class="mt-0.5 text-gray-900">
+                                {{ installationSubtitle }}
+                            </dd>
+                        </div>
+
+                        <div>
+                            <dt class="font-medium text-gray-500">
+                                Montant du paiement
+                            </dt>
+                            <dd class="mt-0.5 text-gray-900">
+                                {{ formatAmount(payment.amount, payment.currency) }}
+                            </dd>
+                        </div>
+
+                        <div v-if="renewalPreview">
+                            <dt class="font-medium text-gray-500">
+                                Période couverte par le paiement
+                            </dt>
+                            <dd class="mt-0.5 text-gray-900">
+                                {{ formatDate(renewalPreview.current_period_start) }}
+                                →
+                                {{ formatDate(renewalPreview.current_period_end) }}
+                            </dd>
+                        </div>
+
+                        <div v-if="renewalPreview">
+                            <dt class="font-medium text-gray-500">
+                                Nouvelle période prévue
+                            </dt>
+                            <dd class="mt-0.5 font-medium text-gray-900">
+                                {{ formatDate(renewalPreview.next_period_start) }}
+                                →
+                                {{ formatDate(renewalPreview.next_period_end) }}
+                            </dd>
+                        </div>
+                    </dl>
+
+                    <div class="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                        <button
+                            type="button"
+                            class="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+                            :disabled="renewing"
+                            @click="showRenewConfirm = false"
+                        >
+                            Annuler
+                        </button>
+
+                        <button
+                            type="button"
+                            class="inline-flex items-center justify-center rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-gray-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+                            :disabled="renewing"
+                            :aria-busy="renewing"
+                            @click="confirmRenewSubscription"
+                        >
+                            {{ renewing ? 'Renouvellement…' : 'Confirmer le renouvellement' }}
+                        </button>
+                    </div>
+                </div>
             </div>
 
             <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -300,9 +420,29 @@ function paymentMethodLabel(method) {
                 </section>
 
                 <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">
-                    <h2 class="text-lg font-semibold text-gray-900">
-                        Abonnement
-                    </h2>
+                    <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                        <h2 class="text-lg font-semibold text-gray-900">
+                            Abonnement
+                        </h2>
+
+                        <button
+                            v-if="canRenewSubscription"
+                            type="button"
+                            class="inline-flex items-center justify-center rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-gray-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+                            :disabled="renewing"
+                            @click="showRenewConfirm = true"
+                        >
+                            Renouveler l'abonnement
+                        </button>
+                    </div>
+
+                    <p
+                        v-if="payment.renewal_applied_at"
+                        class="mt-4 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900"
+                    >
+                        Ce paiement a déjà servi au renouvellement le
+                        {{ formatDate(payment.renewal_applied_at) }}.
+                    </p>
 
                     <dl class="mt-6 grid gap-6 sm:grid-cols-2">
                         <div>

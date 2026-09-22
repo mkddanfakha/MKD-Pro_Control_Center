@@ -29,6 +29,9 @@ Route::middleware('auth')->group(function () {
 
     Route::resource('subscriptions', SubscriptionController::class);
 
+    Route::post('payments/{payment}/renew-subscription', [PaymentController::class, 'renewSubscription'])
+        ->name('payments.renew-subscription');
+
     Route::resource('payments', PaymentController::class);
 
     Route::resource('modules', ModuleController::class);

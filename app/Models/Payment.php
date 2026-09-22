@@ -23,6 +23,7 @@ class Payment extends Model
         'status',
         'due_at',
         'paid_at',
+        'renewal_applied_at',
         'period_start',
         'period_end',
         'payment_method',
@@ -38,6 +39,7 @@ class Payment extends Model
         return [
             'due_at' => 'datetime',
             'paid_at' => 'datetime',
+            'renewal_applied_at' => 'datetime',
             'period_start' => 'datetime',
             'period_end' => 'datetime',
         ];
@@ -66,5 +68,10 @@ class Payment extends Model
     public function isRefunded(): bool
     {
         return $this->status === self::STATUS_REFUNDED;
+    }
+
+    public function hasRenewalBeenApplied(): bool
+    {
+        return $this->renewal_applied_at !== null;
     }
 }

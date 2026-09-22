@@ -2,8 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Exceptions\Subscription\SubscriptionServiceException;
 use App\Models\Payment;
 use App\Models\Subscription;
+use App\Services\SubscriptionService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -11,6 +13,9 @@ use Inertia\Response;
 
 class PaymentController extends Controller
 {
+    public function __construct(
+        private readonly SubscriptionService $subscriptionService,
+    ) {}
     /**
      * Display a listing of the resource.
      */
@@ -61,9 +66,33 @@ class PaymentController extends Controller
             'subscription.installation.client',
         ]);
 
+        $canRenewSubscription = $this->subscriptionService->canRenewFromPayment($payment);
+
         return Inertia::render('Subscriptions/Payments/Show', [
             'payment' => $payment,
+            'canRenewSubscription' => $canRenewSubscription,
+            'renewalPreview' => $canRenewSubscription
+                ? $this->subscriptionService->previewRenewalFromPayment($payment)
+                : null,
         ]);
+    }
+
+    /**
+     * Renouvelle explicitement l'abonnement lié à un paiement payé.
+     */
+    public function renewSubscription(Payment $payment): RedirectResponse
+    {
+        try {
+            $this->subscriptionService->renewFromPayment($payment);
+        } catch (SubscriptionServiceException $exception) {
+            return redirect()
+                ->route('payments.show', $payment)
+                ->with('error', $exception->getMessage());
+        }
+
+        return redirect()
+            ->route('payments.show', $payment)
+            ->with('success', 'Abonnement renouvelé avec succès pour la période suivante.');
     }
 
     /**

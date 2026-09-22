@@ -7,6 +7,7 @@ use App\Exceptions\Subscription\SubscriptionRenewalException;
 use App\Models\Payment;
 use App\Models\Subscription;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\DB;
 
 class SubscriptionService
 {
@@ -76,6 +77,70 @@ class SubscriptionService
     }
 
     /**
+     * Indique si un paiement payé peut encore être utilisé pour renouveler son abonnement.
+     */
+    public function canRenewFromPayment(Payment $payment): bool
+    {
+        try {
+            $this->assertPaymentEligibleForRenewal($payment);
+
+            return true;
+        } catch (SubscriptionRenewalException) {
+            return false;
+        }
+    }
+
+    /**
+     * Prévisualise la période suivante après renouvellement (sans persister).
+     *
+     * @return array{current_period_start: string, current_period_end: string, next_period_start: string, next_period_end: string}
+     */
+    public function previewRenewalFromPayment(Payment $payment): array
+    {
+        $subscription = $this->resolveSubscriptionForPayment($payment);
+        $this->assertPaymentEligibleForRenewal($payment);
+
+        $nextPeriodStart = Carbon::parse($subscription->current_period_end)->addSecond()->startOfDay();
+        $nextPeriod = $this->calculateNextPeriod($subscription, $nextPeriodStart);
+
+        return [
+            'current_period_start' => Carbon::parse($subscription->current_period_start)->toIso8601String(),
+            'current_period_end' => Carbon::parse($subscription->current_period_end)->toIso8601String(),
+            'next_period_start' => $nextPeriod['start']->toIso8601String(),
+            'next_period_end' => $nextPeriod['end']->toIso8601String(),
+        ];
+    }
+
+    /**
+     * Renouvelle l'abonnement à partir d'un paiement payé (action explicite, idempotente côté paiement).
+     */
+    public function renewFromPayment(Payment $payment): Subscription
+    {
+        return DB::transaction(function () use ($payment) {
+            /** @var Payment $lockedPayment */
+            $lockedPayment = Payment::query()
+                ->whereKey($payment->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            /** @var Subscription $subscription */
+            $subscription = Subscription::query()
+                ->whereKey($lockedPayment->subscription_id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            $this->assertPaymentEligibleForRenewal($lockedPayment, $subscription);
+
+            $renewedSubscription = $this->renew($subscription, $lockedPayment);
+
+            $lockedPayment->renewal_applied_at = now();
+            $lockedPayment->save();
+
+            return $renewedSubscription;
+        });
+    }
+
+    /**
      * Renouvelle l'abonnement pour la période mensuelle suivante après un paiement valide.
      */
     public function renew(Subscription $subscription, ?Payment $payment = null): Subscription
@@ -93,6 +158,7 @@ class SubscriptionService
         }
 
         $this->assertPaymentValidForRenewal($subscription, $payment);
+        $this->assertPaymentPeriodCoversCurrentSubscriptionPeriod($subscription, $payment);
 
         $nextPeriodStart = Carbon::parse($subscription->current_period_end)->addSecond()->startOfDay();
         $period = $this->calculateNextPeriod($subscription, $nextPeriodStart);
@@ -105,6 +171,73 @@ class SubscriptionService
         $subscription->save();
 
         return $subscription->fresh();
+    }
+
+    /**
+     * @throws SubscriptionRenewalException
+     */
+    private function assertPaymentEligibleForRenewal(Payment $payment, ?Subscription $subscription = null): void
+    {
+        $subscription ??= $this->resolveSubscriptionForPayment($payment);
+
+        if ($payment->hasRenewalBeenApplied()) {
+            throw new SubscriptionRenewalException('Ce paiement a déjà été utilisé pour renouveler l\'abonnement.');
+        }
+
+        $this->assertPaymentValidForRenewal($subscription, $payment);
+        $this->assertPaymentPeriodCoversCurrentSubscriptionPeriod($subscription, $payment);
+    }
+
+    /**
+     * @throws SubscriptionRenewalException
+     */
+    private function resolveSubscriptionForPayment(Payment $payment): Subscription
+    {
+        $subscription = $payment->relationLoaded('subscription')
+            ? $payment->subscription
+            : $payment->subscription()->first();
+
+        if ($subscription === null) {
+            throw new SubscriptionRenewalException('Aucun abonnement n\'est associé à ce paiement.');
+        }
+
+        return $subscription;
+    }
+
+    /**
+     * Le paiement doit couvrir la période courante de l'abonnement.
+     *
+     * Si period_start et period_end sont renseignés sur le paiement, ils doivent correspondre
+     * au calendrier de current_period_start / current_period_end (comparaison au jour près).
+     * Si les dates du paiement sont absentes, la période courante de l'abonnement est implicitement acceptée.
+     *
+     * @throws SubscriptionRenewalException
+     */
+    private function assertPaymentPeriodCoversCurrentSubscriptionPeriod(Subscription $subscription, Payment $payment): void
+    {
+        if ($subscription->current_period_start === null || $subscription->current_period_end === null) {
+            throw new SubscriptionRenewalException('L\'abonnement ne possède pas de période courante définie.');
+        }
+
+        $paymentPeriodStart = $payment->period_start;
+        $paymentPeriodEnd = $payment->period_end;
+
+        if ($paymentPeriodStart === null && $paymentPeriodEnd === null) {
+            return;
+        }
+
+        if ($paymentPeriodStart === null || $paymentPeriodEnd === null) {
+            throw new SubscriptionRenewalException('Les dates de période du paiement sont incomplètes.');
+        }
+
+        $subscriptionStart = Carbon::parse($subscription->current_period_start)->startOfDay();
+        $subscriptionEndDay = Carbon::parse($subscription->current_period_end)->startOfDay();
+        $paymentStart = Carbon::parse($paymentPeriodStart)->startOfDay();
+        $paymentEndDay = Carbon::parse($paymentPeriodEnd)->startOfDay();
+
+        if (! $paymentStart->equalTo($subscriptionStart) || ! $paymentEndDay->equalTo($subscriptionEndDay)) {
+            throw new SubscriptionRenewalException('La période du paiement ne correspond pas à la période courante de l\'abonnement.');
+        }
     }
 
     /**
