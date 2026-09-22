@@ -3,11 +3,16 @@
 namespace App\Http\Controllers;
 
 use App\Models\Client;
+use App\Services\AuditLogService;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 
 class ClientController extends Controller
 {
+    public function __construct(
+        private readonly AuditLogService $auditLogService,
+    ) {}
+
     /**
      * Display a listing of the resource.
      */
@@ -47,7 +52,13 @@ class ClientController extends Controller
             'notes' => 'nullable|string',
         ]);
 
-        Client::create($validated);
+        $client = Client::create($validated);
+
+        $this->auditLogService->record(
+            'client.created',
+            auditable: $client,
+            newValues: $this->clientAuditSnapshot($client),
+        );
 
         return redirect()
             ->route('clients.index')
@@ -97,7 +108,16 @@ class ClientController extends Controller
             'notes' => 'nullable|string',
         ]);
 
+        $oldValues = $this->clientAuditSnapshot($client);
+
         $client->update($validated);
+
+        $this->auditLogService->record(
+            'client.updated',
+            auditable: $client,
+            oldValues: $oldValues,
+            newValues: $this->clientAuditSnapshot($client->fresh()),
+        );
 
         return redirect()
             ->route('clients.show', $client)
@@ -109,10 +129,38 @@ class ClientController extends Controller
      */
     public function destroy(Client $client)
     {
+        $oldValues = $this->clientAuditSnapshot($client);
+
         $client->delete();
+
+        $this->auditLogService->record(
+            'client.deleted',
+            oldValues: $oldValues,
+        );
 
         return redirect()
             ->route('clients.index')
             ->with('success', 'Client supprimé avec succès.');
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function clientAuditSnapshot(Client $client): array
+    {
+        return array_merge(
+            ['id' => $client->id],
+            $client->only([
+                'company_name',
+                'contact_name',
+                'phone',
+                'email',
+                'address',
+                'city',
+                'country',
+                'status',
+                'notes',
+            ]),
+        );
     }
 }
