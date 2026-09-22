@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Exceptions\Subscription\SubscriptionLifecycleException;
 use App\Exceptions\Subscription\SubscriptionPeriodException;
 use App\Exceptions\Subscription\SubscriptionRenewalException;
 use App\Models\Payment;
@@ -11,6 +12,35 @@ use Illuminate\Support\Facades\DB;
 
 class SubscriptionService
 {
+    /**
+     * Durée de la période de grâce après expiration de la période courante (en jours calendaires).
+     */
+    public const GRACE_PERIOD_DAYS = 7;
+
+    /**
+     * Synchronise le statut de l'abonnement avec la date courante (cycle de vie).
+     */
+    public function syncLifecycle(Subscription $subscription, ?Carbon $now = null): Subscription
+    {
+        $now ??= now();
+
+        return DB::transaction(function () use ($subscription, $now) {
+            /** @var Subscription $lockedSubscription */
+            $lockedSubscription = Subscription::query()
+                ->whereKey($subscription->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            $this->applyLifecycleSync($lockedSubscription, $now);
+
+            if ($lockedSubscription->isDirty()) {
+                $lockedSubscription->save();
+            }
+
+            return $lockedSubscription->fresh();
+        });
+    }
+
     /**
      * Initialise la première période mensuelle lorsque les dates de période ne sont pas encore définies.
      */
@@ -252,5 +282,100 @@ class SubscriptionService
         if (! $payment->isPaid()) {
             throw new SubscriptionRenewalException('Seul un paiement au statut payé permet le renouvellement.');
         }
+    }
+
+    /**
+     * @throws SubscriptionLifecycleException
+     */
+    private function applyLifecycleSync(Subscription $subscription, Carbon $now): void
+    {
+        if ($subscription->isTerminated()) {
+            return;
+        }
+
+        if ($subscription->isSuspended()) {
+            return;
+        }
+
+        if ($subscription->isActive()) {
+            $this->syncActiveSubscription($subscription, $now);
+
+            return;
+        }
+
+        if ($subscription->isInGracePeriod()) {
+            $this->syncGracePeriodSubscription($subscription, $now);
+
+            return;
+        }
+
+        throw new SubscriptionLifecycleException('Statut d\'abonnement non pris en charge pour la synchronisation.');
+    }
+
+    /**
+     * @throws SubscriptionLifecycleException
+     */
+    private function syncActiveSubscription(Subscription $subscription, Carbon $now): void
+    {
+        if ($subscription->current_period_end === null) {
+            throw new SubscriptionLifecycleException('Impossible de synchroniser un abonnement actif sans fin de période courante.');
+        }
+
+        $periodEnd = Carbon::parse($subscription->current_period_end);
+
+        if ($now->lessThanOrEqualTo($periodEnd)) {
+            return;
+        }
+
+        $subscription->status = Subscription::STATUS_GRACE_PERIOD;
+
+        if ($subscription->grace_period_ends_at === null) {
+            $subscription->grace_period_ends_at = $this->calculateGracePeriodEndsAt($periodEnd);
+        }
+    }
+
+    /**
+     * @throws SubscriptionLifecycleException
+     */
+    private function syncGracePeriodSubscription(Subscription $subscription, Carbon $now): void
+    {
+        if ($subscription->grace_period_ends_at === null) {
+            throw new SubscriptionLifecycleException('Impossible de synchroniser un abonnement en période de grâce sans date de fin de grâce.');
+        }
+
+        if ($subscription->current_period_end === null) {
+            throw new SubscriptionLifecycleException('Impossible de synchroniser un abonnement en période de grâce sans fin de période courante.');
+        }
+
+        $graceEndsAt = Carbon::parse($subscription->grace_period_ends_at);
+        $periodEnd = Carbon::parse($subscription->current_period_end);
+
+        if ($graceEndsAt->lessThan($periodEnd)) {
+            throw new SubscriptionLifecycleException('La date de fin de grâce est antérieure à la fin de période courante.');
+        }
+
+        if ($now->lessThanOrEqualTo($graceEndsAt)) {
+            return;
+        }
+
+        $subscription->status = Subscription::STATUS_SUSPENDED;
+
+        if ($subscription->suspended_at === null) {
+            $subscription->suspended_at = $now;
+        }
+    }
+
+    /**
+     * Fin de grâce : dernier instant du N-ième jour après la fin de période (GRACE_PERIOD_DAYS jours complets).
+     *
+     * Exemple : fin de période 31/10 23:59:59 → fin de grâce 07/11 23:59:59.
+     */
+    private function calculateGracePeriodEndsAt(Carbon $currentPeriodEnd): Carbon
+    {
+        return $currentPeriodEnd
+            ->copy()
+            ->addSecond()
+            ->addDays(self::GRACE_PERIOD_DAYS)
+            ->subSecond();
     }
 }
