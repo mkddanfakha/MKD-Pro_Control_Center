@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Client;
 use App\Models\Installation;
+use App\Services\AuditLogService;
 use App\Services\InstallationAccessService;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -11,6 +12,10 @@ use Inertia\Inertia;
 
 class InstallationController extends Controller
 {
+    public function __construct(
+        private readonly AuditLogService $auditLogService,
+    ) {}
+
     /**
      * Display a listing of the resource.
      */
@@ -46,6 +51,12 @@ class InstallationController extends Controller
         $validated = $request->validate($this->validationRules());
 
         $installation = Installation::create($validated);
+
+        $this->auditLogService->record(
+            'installation.created',
+            auditable: $installation,
+            newValues: $this->installationAuditSnapshot($installation),
+        );
 
         return redirect()
             ->route('installations.show', $installation)
@@ -92,7 +103,16 @@ class InstallationController extends Controller
     {
         $validated = $request->validate($this->validationRules($installation));
 
+        $oldValues = $this->installationAuditSnapshot($installation);
+
         $installation->update($validated);
+
+        $this->auditLogService->record(
+            'installation.updated',
+            auditable: $installation,
+            oldValues: $oldValues,
+            newValues: $this->installationAuditSnapshot($installation->fresh()),
+        );
 
         return redirect()
             ->route('installations.show', $installation)
@@ -104,11 +124,42 @@ class InstallationController extends Controller
      */
     public function destroy(Installation $installation)
     {
+        $oldValues = $this->installationAuditSnapshot($installation);
+
         $installation->delete();
+
+        $this->auditLogService->record(
+            'installation.deleted',
+            oldValues: $oldValues,
+        );
 
         return redirect()
             ->route('installations.index')
             ->with('success', 'Installation supprimée avec succès.');
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function installationAuditSnapshot(Installation $installation): array
+    {
+        return array_merge(
+            ['id' => $installation->id],
+            $installation->only([
+                'client_id',
+                'name',
+                'subdomain',
+                'domain',
+                'status',
+                'version',
+                'database_name',
+                'database_host',
+                'installed_at',
+                'last_seen_at',
+                'suspended_at',
+                'terminated_at',
+            ]),
+        );
     }
 
     /**
