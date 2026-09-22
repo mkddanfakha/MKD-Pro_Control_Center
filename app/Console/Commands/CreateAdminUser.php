@@ -3,15 +3,23 @@
 namespace App\Console\Commands;
 
 use App\Models\User;
+use App\Services\AuditLogService;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Hash;
+use Throwable;
 
 #[Signature('app:create-admin-user')]
 #[Description('Create the first MKD-Pro Control Center administrator')]
 class CreateAdminUser extends Command
 {
+    public function __construct(
+        private readonly AuditLogService $auditLogService,
+    ) {
+        parent::__construct();
+    }
+
     public function handle(): int
     {
         $name = $this->ask('Nom de l’administrateur');
@@ -38,11 +46,34 @@ class CreateAdminUser extends Command
             return self::FAILURE;
         }
 
-        $user = User::create([
-            'name' => $name,
-            'email' => $email,
-            'password' => Hash::make($password),
-        ]);
+        try {
+            $user = User::create([
+                'name' => $name,
+                'email' => $email,
+                'password' => Hash::make($password),
+            ]);
+        } catch (Throwable $exception) {
+            $this->auditLogService->record(
+                'user.create_failed',
+                newValues: [
+                    'name' => $name,
+                    'email' => $email,
+                ],
+                result: 'failure',
+                errorMessage: $exception->getMessage(),
+            );
+
+            $this->error('Impossible de créer l’administrateur : '.$exception->getMessage());
+
+            return self::FAILURE;
+        }
+
+        $this->auditLogService->record(
+            'user.created',
+            auditable: $user,
+            newValues: $this->userCreationAuditSnapshot($user),
+            result: 'success',
+        );
 
         $this->newLine();
         $this->info('Administrateur créé avec succès.');
@@ -50,5 +81,17 @@ class CreateAdminUser extends Command
         $this->line("E-mail : {$user->email}");
 
         return self::SUCCESS;
+    }
+
+    /**
+     * @return array{id: int, name: string, email: string}
+     */
+    private function userCreationAuditSnapshot(User $user): array
+    {
+        return [
+            'id' => $user->id,
+            'name' => $user->name,
+            'email' => $user->email,
+        ];
     }
 }

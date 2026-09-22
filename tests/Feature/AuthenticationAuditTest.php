@@ -34,7 +34,9 @@ class AuthenticationAuditTest extends TestCase
         $this->assertNull($log->old_values);
         $this->assertSame($user->id, $log->new_values['id']);
         $this->assertSame('login-audit@example.com', $log->new_values['email']);
+        $this->assertSame(['id', 'email'], array_keys($log->new_values));
         $this->assertDoesNotContainSensitiveAuthData($log);
+        $this->assertForbiddenCredentialKeysAbsent($log);
     }
 
     public function test_logout_is_audited(): void
@@ -81,7 +83,33 @@ class AuthenticationAuditTest extends TestCase
         $this->assertNull($log->user_id);
         $this->assertSame('known-user@example.com', $log->new_values['email']);
         $this->assertNull($log->old_values);
+        $this->assertSame(['email'], array_keys($log->new_values));
         $this->assertDoesNotContainSensitiveAuthData($log);
+    }
+
+    public function test_auth_audit_payloads_exclude_forbidden_credential_keys(): void
+    {
+        $user = User::factory()->create([
+            'email' => 'keys-check@example.com',
+            'password' => 'secret-password',
+        ]);
+
+        $this->post(route('login'), [
+            'email' => 'keys-check@example.com',
+            'password' => 'secret-password',
+        ])->assertRedirect();
+
+        $this->actingAs($user)->post(route('logout'))->assertRedirect();
+
+        $this->post(route('login'), [
+            'email' => 'keys-check@example.com',
+            'password' => 'wrong-password',
+        ])->assertSessionHasErrors('email');
+
+        foreach (AuditLog::query()->get() as $log) {
+            $this->assertDoesNotContainSensitiveAuthData($log);
+            $this->assertForbiddenCredentialKeysAbsent($log);
+        }
     }
 
     public function test_each_authentication_event_creates_exactly_one_audit_log(): void
@@ -133,6 +161,29 @@ class AuthenticationAuditTest extends TestCase
         $this->assertSame('AuthenticationAuditTest/1.0', $log->user_agent);
     }
 
+    private function assertForbiddenCredentialKeysAbsent(AuditLog $log): void
+    {
+        $forbidden = [
+            'password',
+            'password_hash',
+            'remember_token',
+            'two_factor_secret',
+            'two_factor_recovery_codes',
+            'token',
+            'credentials',
+        ];
+
+        foreach ([$log->old_values, $log->new_values] as $payload) {
+            if (! is_array($payload)) {
+                continue;
+            }
+
+            foreach ($forbidden as $key) {
+                $this->assertArrayNotHasKey($key, $payload);
+            }
+        }
+    }
+
     private function assertDoesNotContainSensitiveAuthData(AuditLog $log): void
     {
         $encoded = json_encode([
@@ -145,6 +196,9 @@ class AuthenticationAuditTest extends TestCase
         $this->assertStringNotContainsString('wrong-password', $encoded);
         $this->assertStringNotContainsString('password', strtolower($encoded));
         $this->assertStringNotContainsString('remember_token', strtolower($encoded));
+        $this->assertStringNotContainsString('two_factor_secret', strtolower($encoded));
+        $this->assertStringNotContainsString('two_factor_recovery', strtolower($encoded));
+        $this->assertStringNotContainsString('credentials', strtolower($encoded));
         $this->assertStringNotContainsString('$2y$', $encoded);
     }
 }
