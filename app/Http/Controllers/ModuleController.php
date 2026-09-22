@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Module;
+use App\Services\AuditLogService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -11,6 +12,10 @@ use Inertia\Response;
 
 class ModuleController extends Controller
 {
+    public function __construct(
+        private readonly AuditLogService $auditLogService,
+    ) {}
+
     /**
      * Display a listing of the resource.
      */
@@ -41,6 +46,12 @@ class ModuleController extends Controller
         $validated = $request->validate($this->validationRules());
 
         $module = Module::create($validated);
+
+        $this->auditLogService->record(
+            'module.created',
+            auditable: $module,
+            newValues: $this->moduleAuditSnapshot($module),
+        );
 
         return redirect()
             ->route('modules.show', $module)
@@ -74,7 +85,16 @@ class ModuleController extends Controller
     {
         $validated = $request->validate($this->validationRules($module));
 
+        $oldValues = $this->moduleAuditSnapshot($module);
+
         $module->update($validated);
+
+        $this->auditLogService->record(
+            'module.updated',
+            auditable: $module,
+            oldValues: $oldValues,
+            newValues: $this->moduleAuditSnapshot($module->fresh()),
+        );
 
         return redirect()
             ->route('modules.show', $module)
@@ -86,11 +106,38 @@ class ModuleController extends Controller
      */
     public function destroy(Module $module): RedirectResponse
     {
+        $oldValues = $this->moduleAuditSnapshot($module);
+
         $module->delete();
+
+        $this->auditLogService->record(
+            'module.deleted',
+            oldValues: $oldValues,
+        );
 
         return redirect()
             ->route('modules.index')
             ->with('success', 'Module supprimé avec succès.');
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function moduleAuditSnapshot(Module $module): array
+    {
+        return array_merge(
+            ['id' => $module->id],
+            $module->only([
+                'name',
+                'slug',
+                'description',
+                'version',
+                'price',
+                'currency',
+                'status',
+                'sort_order',
+            ]),
+        );
     }
 
     /**
