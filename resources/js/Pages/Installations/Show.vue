@@ -7,6 +7,10 @@ defineProps({
         type: Object,
         required: true,
     },
+    access: {
+        type: Object,
+        required: true,
+    },
 });
 
 const page = usePage();
@@ -35,6 +39,29 @@ function statusBadgeClass(status) {
     };
 
     return classes[status] ?? 'bg-gray-100 text-gray-600 ring-gray-200';
+}
+
+function accessBadgeClass(status) {
+    if (status === 'accessible') {
+        return 'bg-sky-50 text-sky-800 ring-sky-200';
+    }
+
+    return 'bg-amber-50 text-amber-900 ring-amber-200';
+}
+
+function accessPrimaryLabel(status) {
+    return status === 'accessible' ? 'Accessible' : 'Non accessible';
+}
+
+function accessDetailLabel(status) {
+    const labels = {
+        accessible: null,
+        suspended: 'Abonnement suspendu',
+        terminated: 'Abonnement terminé',
+        no_subscription: 'Aucun abonnement',
+    };
+
+    return labels[status] ?? null;
 }
 
 function formatDateTime(value) {
@@ -167,6 +194,32 @@ function formatDateTime(value) {
                             </dd>
                         </div>
                     </dl>
+                </section>
+
+                <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">
+                    <h2 class="text-lg font-semibold text-gray-900">
+                        Accès
+                    </h2>
+
+                    <p class="mt-1 text-sm text-gray-500">
+                        État d'accès calculé à partir de l'abonnement associé à cette installation.
+                    </p>
+
+                    <div class="mt-6">
+                        <span
+                            class="inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset"
+                            :class="accessBadgeClass(access.status)"
+                        >
+                            {{ accessPrimaryLabel(access.status) }}
+                        </span>
+
+                        <p
+                            v-if="accessDetailLabel(access.status)"
+                            class="mt-3 text-sm text-gray-700"
+                        >
+                            {{ accessDetailLabel(access.status) }}
+                        </p>
+                    </div>
                 </section>
 
                 <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">

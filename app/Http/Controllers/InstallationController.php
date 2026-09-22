@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Client;
 use App\Models\Installation;
+use App\Services\InstallationAccessService;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
@@ -54,12 +55,16 @@ class InstallationController extends Controller
     /**
      * Display the specified resource.
      */
-    public function show(Installation $installation)
+    public function show(Installation $installation, InstallationAccessService $accessService)
     {
         $installation->load('client');
 
         return Inertia::render('Installations/Show', [
             'installation' => $installation,
+            'access' => [
+                'accessible' => $accessService->isAccessible($installation),
+                'status' => $accessService->accessStatus($installation),
+            ],
         ]);
     }
 
