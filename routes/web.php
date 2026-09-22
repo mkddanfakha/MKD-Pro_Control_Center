@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AuditLogController;
 use App\Http\Controllers\ClientController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\InstallationController;
@@ -22,6 +23,8 @@ Route::get('/login', function () {
 
 Route::middleware('auth')->group(function () {
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
+
+    Route::get('/audit-logs', [AuditLogController::class, 'index'])->name('audit-logs.index');
 
     Route::resource('clients', ClientController::class);
 
