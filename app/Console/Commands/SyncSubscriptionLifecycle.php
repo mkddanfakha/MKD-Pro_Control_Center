@@ -4,7 +4,9 @@ namespace App\Console\Commands;
 
 use App\Exceptions\Subscription\SubscriptionLifecycleException;
 use App\Models\Subscription;
+use App\Services\AuditLogService;
 use App\Services\SubscriptionService;
+use DateTimeInterface;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
@@ -17,6 +19,7 @@ class SyncSubscriptionLifecycle extends Command
 {
     public function __construct(
         private readonly SubscriptionService $subscriptionService,
+        private readonly AuditLogService $auditLogService,
     ) {
         parent::__construct();
     }
@@ -67,7 +70,9 @@ class SyncSubscriptionLifecycle extends Command
     {
         $stats['total']++;
         $subscriptionId = $subscription->id;
-        $statusBefore = $subscription->status;
+        $subscriptionBeforeSync = $subscription->fresh() ?? $subscription;
+        $statusBefore = $subscriptionBeforeSync->status;
+        $oldValues = $this->lifecycleSyncAuditSnapshot($subscriptionBeforeSync);
 
         try {
             $updated = $this->subscriptionService->syncLifecycle($subscription);
@@ -83,6 +88,14 @@ class SyncSubscriptionLifecycle extends Command
                 return;
             }
 
+            $this->auditLogService->record(
+                'subscription.lifecycle_synced',
+                auditable: $updated,
+                oldValues: $oldValues,
+                newValues: $this->lifecycleSyncAuditSnapshot($updated),
+                result: 'success',
+            );
+
             if ($statusBefore === Subscription::STATUS_ACTIVE && $statusAfter === Subscription::STATUS_GRACE_PERIOD) {
                 $stats['active_to_grace']++;
             } elseif ($statusBefore === Subscription::STATUS_GRACE_PERIOD && $statusAfter === Subscription::STATUS_SUSPENDED) {
@@ -95,16 +108,55 @@ class SyncSubscriptionLifecycle extends Command
         } catch (SubscriptionLifecycleException $exception) {
             $stats['errors']++;
 
+            $this->recordLifecycleSyncFailure($subscriptionBeforeSync, $exception);
+
             if (! $quiet) {
                 $this->warn("⚠ Abonnement #{$subscriptionId} : erreur — {$exception->getMessage()}");
             }
         } catch (Throwable $exception) {
             $stats['errors']++;
 
+            $this->recordLifecycleSyncFailure($subscriptionBeforeSync, $exception);
+
             if (! $quiet) {
                 $this->error("✗ Abonnement #{$subscriptionId} : erreur inattendue — {$exception->getMessage()}");
             }
         }
+    }
+
+    private function recordLifecycleSyncFailure(Subscription $subscription, Throwable $exception): void
+    {
+        $this->auditLogService->record(
+            'subscription.lifecycle_sync_failed',
+            auditable: $subscription,
+            result: 'failure',
+            errorMessage: $exception->getMessage(),
+        );
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function lifecycleSyncAuditSnapshot(Subscription $subscription): array
+    {
+        $snapshot = [];
+
+        foreach ([
+            'status',
+            'current_period_end',
+            'grace_period_ends_at',
+            'suspended_at',
+        ] as $attribute) {
+            $value = $subscription->getAttribute($attribute);
+
+            if ($value instanceof DateTimeInterface) {
+                $snapshot[$attribute] = $value->format('Y-m-d H:i:s');
+            } else {
+                $snapshot[$attribute] = $value;
+            }
+        }
+
+        return $snapshot;
     }
 
     /**
