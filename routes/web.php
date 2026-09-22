@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\ClientController;
+use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\InstallationController;
 use App\Http\Controllers\InstallationModuleController;
 use App\Http\Controllers\ModuleController;
@@ -20,11 +21,7 @@ Route::get('/login', function () {
 })->name('login');
 
 Route::middleware('auth')->group(function () {
-    Route::get('/dashboard', function () {
-        return Inertia::render('Dashboard', [
-            'title' => 'MKD-Pro Control Center',
-        ]);
-    })->name('dashboard');
+    Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
 
     Route::resource('clients', ClientController::class);
 
