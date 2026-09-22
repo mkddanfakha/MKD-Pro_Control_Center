@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Models\Installation;
 use App\Models\Subscription;
+use App\Services\AuditLogService;
+use DateTimeInterface;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -11,6 +13,10 @@ use Inertia\Response;
 
 class SubscriptionController extends Controller
 {
+    public function __construct(
+        private readonly AuditLogService $auditLogService,
+    ) {}
+
     /**
      * Display a listing of the resource.
      */
@@ -55,6 +61,12 @@ class SubscriptionController extends Controller
 
         $subscription = Subscription::create($validated);
 
+        $this->auditLogService->record(
+            'subscription.created',
+            auditable: $subscription,
+            newValues: $this->subscriptionAuditSnapshot($subscription),
+        );
+
         return redirect()
             ->route('subscriptions.show', $subscription)
             ->with('success', 'Abonnement créé avec succès.');
@@ -95,7 +107,16 @@ class SubscriptionController extends Controller
     {
         $validated = $request->validate($this->validationRules());
 
+        $oldValues = $this->subscriptionAuditSnapshot($subscription);
+
         $subscription->update($validated);
+
+        $this->auditLogService->record(
+            'subscription.updated',
+            auditable: $subscription,
+            oldValues: $oldValues,
+            newValues: $this->subscriptionAuditSnapshot($subscription->fresh()),
+        );
 
         return redirect()
             ->route('subscriptions.show', $subscription)
@@ -107,11 +128,50 @@ class SubscriptionController extends Controller
      */
     public function destroy(Subscription $subscription): RedirectResponse
     {
+        $oldValues = $this->subscriptionAuditSnapshot($subscription);
+
         $subscription->delete();
+
+        $this->auditLogService->record(
+            'subscription.deleted',
+            oldValues: $oldValues,
+        );
 
         return redirect()
             ->route('subscriptions.index')
             ->with('success', 'Abonnement supprimé avec succès.');
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function subscriptionAuditSnapshot(Subscription $subscription): array
+    {
+        $snapshot = ['id' => $subscription->id];
+
+        foreach ([
+            'installation_id',
+            'amount',
+            'currency',
+            'status',
+            'starts_at',
+            'current_period_start',
+            'current_period_end',
+            'grace_period_ends_at',
+            'suspended_at',
+            'terminated_at',
+            'notes',
+        ] as $attribute) {
+            $value = $subscription->getAttribute($attribute);
+
+            if ($value instanceof DateTimeInterface) {
+                $snapshot[$attribute] = $value->format('Y-m-d H:i:s');
+            } else {
+                $snapshot[$attribute] = $value;
+            }
+        }
+
+        return $snapshot;
     }
 
     /**
