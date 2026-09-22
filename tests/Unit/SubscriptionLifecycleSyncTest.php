@@ -247,7 +247,7 @@ class SubscriptionLifecycleSyncTest extends TestCase
         $this->assertSame('2026-11-09 09:30:00', $synced->suspended_at->format('Y-m-d H:i:s'));
     }
 
-    public function test_linked_installation_is_not_modified_by_lifecycle_sync(): void
+    public function test_active_to_grace_period_does_not_modify_installation_status(): void
     {
         $subscription = $this->makeSubscription([
             'current_period_start' => '2026-10-01 00:00:00',
@@ -258,16 +258,73 @@ class SubscriptionLifecycleSyncTest extends TestCase
         $installation = Installation::query()->findOrFail($subscription->installation_id);
         $installation->update(['status' => 'active']);
 
-        $before = $installation->fresh()->only(['status', 'suspended_at', 'terminated_at']);
+        $installationBefore = $installation->fresh()->only(['status', 'suspended_at', 'terminated_at']);
 
-        $this->service->syncLifecycle(
+        $synced = $this->service->syncLifecycle(
+            $subscription,
+            Carbon::parse('2026-11-01 00:00:00'),
+        );
+
+        $this->assertSame(Subscription::STATUS_GRACE_PERIOD, $synced->status);
+        $this->assertSame('active', $installation->fresh()->status);
+        $this->assertSame(
+            $installationBefore,
+            $installation->fresh()->only(['status', 'suspended_at', 'terminated_at']),
+        );
+    }
+
+    public function test_grace_period_to_suspended_does_not_modify_installation_status(): void
+    {
+        $subscription = $this->makeSubscription([
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+            'status' => Subscription::STATUS_GRACE_PERIOD,
+            'grace_period_ends_at' => '2026-11-07 23:59:59',
+        ]);
+
+        $installation = Installation::query()->findOrFail($subscription->installation_id);
+        $installation->update(['status' => 'active']);
+
+        $installationBefore = $installation->fresh()->only(['status', 'suspended_at', 'terminated_at']);
+
+        $synced = $this->service->syncLifecycle(
             $subscription,
             Carbon::parse('2026-11-08 00:00:00'),
         );
 
-        $after = $installation->fresh()->only(['status', 'suspended_at', 'terminated_at']);
+        $this->assertSame(Subscription::STATUS_SUSPENDED, $synced->status);
+        $this->assertSame('active', $installation->fresh()->status);
+        $this->assertSame(
+            $installationBefore,
+            $installation->fresh()->only(['status', 'suspended_at', 'terminated_at']),
+        );
+    }
 
-        $this->assertSame($before, $after);
+    public function test_suspended_subscription_sync_does_not_modify_installation_status(): void
+    {
+        $subscription = $this->makeSubscription([
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+            'status' => Subscription::STATUS_SUSPENDED,
+            'suspended_at' => '2026-11-08 00:00:00',
+        ]);
+
+        $installation = Installation::query()->findOrFail($subscription->installation_id);
+        $installation->update(['status' => 'active']);
+
+        $installationBefore = $installation->fresh()->only(['status', 'suspended_at', 'terminated_at']);
+
+        $synced = $this->service->syncLifecycle(
+            $subscription,
+            Carbon::parse('2026-12-01 00:00:00'),
+        );
+
+        $this->assertSame(Subscription::STATUS_SUSPENDED, $synced->status);
+        $this->assertSame('active', $installation->fresh()->status);
+        $this->assertSame(
+            $installationBefore,
+            $installation->fresh()->only(['status', 'suspended_at', 'terminated_at']),
+        );
     }
 
     /**
