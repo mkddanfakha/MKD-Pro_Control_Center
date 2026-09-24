@@ -3,6 +3,7 @@
 namespace App\Actions\Fortify;
 
 use App\Models\User;
+use App\Services\AuditLogService;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
@@ -11,6 +12,9 @@ use Laravel\Fortify\Contracts\UpdatesUserProfileInformation;
 
 class UpdateUserProfileInformation implements UpdatesUserProfileInformation
 {
+    public function __construct(
+        private readonly AuditLogService $auditLogService,
+    ) {}
     /**
      * Validate and update the given user's profile information.
      *
@@ -32,6 +36,8 @@ class UpdateUserProfileInformation implements UpdatesUserProfileInformation
             ],
         ])->validateWithBag('updateProfileInformation');
 
+        $oldValues = $this->profileAuditSnapshot($user);
+
         if ($input['email'] !== $user->email &&
             $user instanceof MustVerifyEmail) {
             $this->updateVerifiedUser($user, $input);
@@ -41,6 +47,14 @@ class UpdateUserProfileInformation implements UpdatesUserProfileInformation
                 'email' => $input['email'],
             ])->save();
         }
+
+        $this->auditLogService->record(
+            'user.profile_updated',
+            auditable: $user->fresh() ?? $user,
+            oldValues: $oldValues,
+            newValues: $this->profileAuditSnapshot($user->fresh() ?? $user),
+            result: 'success',
+        );
     }
 
     /**
@@ -57,5 +71,17 @@ class UpdateUserProfileInformation implements UpdatesUserProfileInformation
         ])->save();
 
         $user->sendEmailVerificationNotification();
+    }
+
+    /**
+     * @return array{id: int|null, name: string|null, email: string|null}
+     */
+    private function profileAuditSnapshot(User $user): array
+    {
+        return [
+            'id' => $user->id,
+            'name' => $user->name,
+            'email' => $user->email,
+        ];
     }
 }
