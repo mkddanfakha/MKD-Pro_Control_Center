@@ -24,10 +24,10 @@ function statusLabel(status) {
 
 function installationStatusLabel(status) {
     const labels = {
-        active: 'Actif',
-        inactive: 'Inactif',
-        suspended: 'Suspendue',
-        terminated: 'Terminée',
+        active: 'Installation active',
+        inactive: 'Installation inactive',
+        suspended: 'Installation suspendue',
+        terminated: 'Installation terminée',
     };
 
     return labels[status] ?? status;
@@ -319,13 +319,13 @@ function formatDate(value) {
                                             scope="col"
                                             class="px-4 py-3 font-semibold text-gray-700 sm:px-6"
                                         >
-                                            Statut
+                                            Statut installation
                                         </th>
                                         <th
                                             scope="col"
                                             class="hidden px-4 py-3 font-semibold text-gray-700 md:table-cell sm:px-6"
                                         >
-                                            Dernière activité
+                                            Dernière présence enregistrée
                                         </th>
                                         <th
                                             scope="col"

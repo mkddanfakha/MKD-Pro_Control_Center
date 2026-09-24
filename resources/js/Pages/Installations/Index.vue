@@ -26,18 +26,18 @@ function formatDateTime(value) {
     }).format(new Date(value));
 }
 
-function statusLabel(status) {
+function installationStatusLabel(status) {
     const labels = {
-        active: 'Actif',
-        inactive: 'Inactif',
-        suspended: 'Suspendue',
-        terminated: 'Terminée',
+        active: 'Installation active',
+        inactive: 'Installation inactive',
+        suspended: 'Installation suspendue',
+        terminated: 'Installation terminée',
     };
 
     return labels[status] ?? status;
 }
 
-function statusBadgeClass(status) {
+function installationStatusBadgeClass(status) {
     const classes = {
         active: 'bg-sky-50 text-sky-800 ring-sky-200',
         inactive: 'bg-gray-100 text-gray-600 ring-gray-200',
@@ -46,6 +46,60 @@ function statusBadgeClass(status) {
     };
 
     return classes[status] ?? 'bg-gray-100 text-gray-600 ring-gray-200';
+}
+
+function accessPrimaryLabel(access) {
+    if (!access || access.status === 'no_subscription') {
+        return 'Accès non autorisé';
+    }
+
+    if (access.status === 'suspended') {
+        return 'Accès non autorisé';
+    }
+
+    if (access.status === 'terminated') {
+        return 'Accès non autorisé';
+    }
+
+    return 'Accès autorisé selon l’abonnement';
+}
+
+function accessDetailLabel(access) {
+    if (!access) {
+        return 'Aucun abonnement';
+    }
+
+    if (access.status === 'suspended') {
+        return 'Abonnement suspendu';
+    }
+
+    if (access.status === 'terminated') {
+        return 'Abonnement terminé';
+    }
+
+    if (access.status === 'no_subscription') {
+        return 'Aucun abonnement';
+    }
+
+    if (access.accessible) {
+        if (access.subscription_status === 'grace_period') {
+            return 'Période de grâce';
+        }
+
+        if (access.subscription_status === 'active') {
+            return 'Abonnement actif';
+        }
+    }
+
+    return null;
+}
+
+function accessBadgeClass(access) {
+    if (access?.accessible) {
+        return 'border-2 border-emerald-600 bg-white text-emerald-800';
+    }
+
+    return 'border-2 border-amber-600 bg-white text-amber-900';
 }
 
 function displayValue(value) {
@@ -248,13 +302,19 @@ function confirmDelete() {
                                         scope="col"
                                         class="px-4 py-3 font-semibold text-gray-700 sm:px-6"
                                     >
-                                        Statut
+                                        Statut installation
+                                    </th>
+                                    <th
+                                        scope="col"
+                                        class="hidden px-4 py-3 font-semibold text-gray-700 lg:table-cell sm:px-6"
+                                    >
+                                        Accès selon l’abonnement
                                     </th>
                                     <th
                                         scope="col"
                                         class="hidden px-4 py-3 font-semibold text-gray-700 md:table-cell sm:px-6"
                                     >
-                                        Dernière activité
+                                        Dernière présence enregistrée
                                     </th>
                                     <th
                                         scope="col"
@@ -295,13 +355,28 @@ function confirmDelete() {
                                     <td class="whitespace-nowrap px-4 py-4 sm:px-6">
                                         <span
                                             class="inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset"
-                                            :class="statusBadgeClass(installation.status)"
+                                            :class="installationStatusBadgeClass(installation.status)"
                                         >
-                                            {{ statusLabel(installation.status) }}
+                                            {{ installationStatusLabel(installation.status) }}
                                         </span>
                                     </td>
+                                    <td class="hidden px-4 py-4 lg:table-cell sm:px-6">
+                                        <span
+                                            class="inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium"
+                                            :class="accessBadgeClass(installation.access)"
+                                        >
+                                            {{ accessPrimaryLabel(installation.access) }}
+                                        </span>
+                                        <p
+                                            v-if="accessDetailLabel(installation.access)"
+                                            class="mt-1 text-xs text-gray-600"
+                                        >
+                                            {{ accessDetailLabel(installation.access) }}
+                                        </p>
+                                    </td>
                                     <td class="hidden whitespace-nowrap px-4 py-4 text-gray-600 md:table-cell sm:px-6">
-                                        {{ formatDateTime(installation.last_seen_at) }}
+                                        <span>{{ formatDateTime(installation.last_seen_at) }}</span>
+                                        <span class="mt-0.5 block text-xs text-gray-500">Saisie manuelle actuellement</span>
                                     </td>
                                     <td class="px-4 py-4 sm:px-6">
                                         <div class="flex flex-wrap items-center gap-x-3 gap-y-2">

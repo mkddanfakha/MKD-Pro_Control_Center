@@ -11,6 +11,10 @@ defineProps({
         type: Object,
         required: true,
     },
+    lastSubscription: {
+        type: Object,
+        default: null,
+    },
 });
 
 const page = usePage();
@@ -19,18 +23,18 @@ function displayValue(value) {
     return value && String(value).trim() !== '' ? value : '—';
 }
 
-function statusLabel(status) {
+function installationStatusLabel(status) {
     const labels = {
-        active: 'Actif',
-        inactive: 'Inactif',
-        suspended: 'Suspendue',
-        terminated: 'Terminée',
+        active: 'Installation active',
+        inactive: 'Installation inactive',
+        suspended: 'Installation suspendue',
+        terminated: 'Installation terminée',
     };
 
     return labels[status] ?? status;
 }
 
-function statusBadgeClass(status) {
+function installationStatusBadgeClass(status) {
     const classes = {
         active: 'bg-sky-50 text-sky-800 ring-sky-200',
         inactive: 'bg-gray-100 text-gray-600 ring-gray-200',
@@ -41,27 +45,83 @@ function statusBadgeClass(status) {
     return classes[status] ?? 'bg-gray-100 text-gray-600 ring-gray-200';
 }
 
-function accessBadgeClass(status) {
-    if (status === 'accessible') {
-        return 'bg-sky-50 text-sky-800 ring-sky-200';
-    }
-
-    return 'bg-amber-50 text-amber-900 ring-amber-200';
-}
-
-function accessPrimaryLabel(status) {
-    return status === 'accessible' ? 'Accessible' : 'Non accessible';
-}
-
-function accessDetailLabel(status) {
+function subscriptionStatusLabel(status) {
     const labels = {
-        accessible: null,
+        active: 'Abonnement actif',
+        grace_period: 'Période de grâce',
         suspended: 'Abonnement suspendu',
         terminated: 'Abonnement terminé',
-        no_subscription: 'Aucun abonnement',
     };
 
-    return labels[status] ?? null;
+    return labels[status] ?? status;
+}
+
+function subscriptionStatusBadgeClass(status) {
+    const classes = {
+        active: 'bg-violet-50 text-violet-900 ring-violet-200',
+        grace_period: 'bg-violet-100 text-violet-900 ring-violet-300',
+        suspended: 'bg-orange-50 text-orange-900 ring-orange-200',
+        terminated: 'bg-stone-100 text-stone-700 ring-stone-300',
+    };
+
+    return classes[status] ?? 'bg-violet-50 text-violet-900 ring-violet-200';
+}
+
+function accessPrimaryLabel(access) {
+    if (!access?.accessible) {
+        return 'Accès non autorisé';
+    }
+
+    return 'Accès autorisé selon l’abonnement';
+}
+
+function accessDetailLabel(access) {
+    if (!access) {
+        return 'Aucun abonnement';
+    }
+
+    if (access.status === 'suspended') {
+        return 'Abonnement suspendu';
+    }
+
+    if (access.status === 'terminated') {
+        return 'Abonnement terminé';
+    }
+
+    if (access.status === 'no_subscription') {
+        return 'Aucun abonnement';
+    }
+
+    if (access.subscription_status === 'grace_period') {
+        return 'Période de grâce';
+    }
+
+    if (access.subscription_status === 'active') {
+        return 'Abonnement actif';
+    }
+
+    return null;
+}
+
+function accessBadgeClass(access) {
+    if (access?.accessible) {
+        return 'border-2 border-emerald-600 bg-white text-emerald-800';
+    }
+
+    return 'border-2 border-amber-600 bg-white text-amber-900';
+}
+
+function formatMoney(amount, currency) {
+    if (amount == null || amount === '') {
+        return '—';
+    }
+
+    const formatted = new Intl.NumberFormat('fr-FR', {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 2,
+    }).format(Number(amount));
+
+    return currency ? `${formatted} ${currency}` : formatted;
 }
 
 function formatDateTime(value) {
@@ -131,8 +191,12 @@ function formatDateTime(value) {
             <div class="mt-8 space-y-8">
                 <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">
                     <h2 class="text-lg font-semibold text-gray-900">
-                        Informations générales
+                        Installation
                     </h2>
+
+                    <p class="mt-1 text-sm text-gray-500">
+                        État administratif et informations techniques de l’installation.
+                    </p>
 
                     <dl class="mt-6 grid gap-6 sm:grid-cols-2">
                         <div>
@@ -141,6 +205,20 @@ function formatDateTime(value) {
                             </dt>
                             <dd class="mt-1 text-sm font-medium text-gray-900">
                                 {{ displayValue(installation.name) }}
+                            </dd>
+                        </div>
+
+                        <div>
+                            <dt class="text-sm font-medium text-gray-500">
+                                Statut de l’installation
+                            </dt>
+                            <dd class="mt-1">
+                                <span
+                                    class="inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset"
+                                    :class="installationStatusBadgeClass(installation.status)"
+                                >
+                                    {{ installationStatusLabel(installation.status) }}
+                                </span>
                             </dd>
                         </div>
 
@@ -166,22 +244,8 @@ function formatDateTime(value) {
                             <dt class="text-sm font-medium text-gray-500">
                                 Domaine
                             </dt>
-                            <dd class="mt-1 text-sm text-gray-900 break-all">
+                            <dd class="mt-1 text-sm break-all text-gray-900">
                                 {{ displayValue(installation.domain) }}
-                            </dd>
-                        </div>
-
-                        <div>
-                            <dt class="text-sm font-medium text-gray-500">
-                                Statut
-                            </dt>
-                            <dd class="mt-1">
-                                <span
-                                    class="inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset"
-                                    :class="statusBadgeClass(installation.status)"
-                                >
-                                    {{ statusLabel(installation.status) }}
-                                </span>
                             </dd>
                         </div>
 
@@ -196,28 +260,103 @@ function formatDateTime(value) {
                     </dl>
                 </section>
 
-                <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">
+                <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-violet-100 sm:p-8">
                     <h2 class="text-lg font-semibold text-gray-900">
-                        Accès
+                        Abonnement
                     </h2>
 
                     <p class="mt-1 text-sm text-gray-500">
-                        État d'accès calculé à partir de l'abonnement associé à cette installation.
+                        Abonnement pris en compte : dernier abonnement enregistré.
+                    </p>
+
+                    <template v-if="lastSubscription">
+                        <p class="mt-3 text-sm font-medium text-violet-900">
+                            Accès déterminé selon cet abonnement.
+                        </p>
+
+                        <dl class="mt-6 grid gap-6 sm:grid-cols-2">
+                            <div>
+                                <dt class="text-sm font-medium text-gray-500">
+                                    Statut de l’abonnement
+                                </dt>
+                                <dd class="mt-1">
+                                    <span
+                                        class="inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset"
+                                        :class="subscriptionStatusBadgeClass(lastSubscription.status)"
+                                    >
+                                        {{ subscriptionStatusLabel(lastSubscription.status) }}
+                                    </span>
+                                </dd>
+                            </div>
+
+                            <div>
+                                <dt class="text-sm font-medium text-gray-500">
+                                    Montant
+                                </dt>
+                                <dd class="mt-1 text-sm text-gray-900">
+                                    {{ formatMoney(lastSubscription.amount, lastSubscription.currency) }}
+                                </dd>
+                            </div>
+
+                            <div>
+                                <dt class="text-sm font-medium text-gray-500">
+                                    Début de la période actuelle
+                                </dt>
+                                <dd class="mt-1 text-sm text-gray-900">
+                                    {{ formatDateTime(lastSubscription.current_period_start) }}
+                                </dd>
+                            </div>
+
+                            <div>
+                                <dt class="text-sm font-medium text-gray-500">
+                                    Fin de la période actuelle
+                                </dt>
+                                <dd class="mt-1 text-sm text-gray-900">
+                                    {{ formatDateTime(lastSubscription.current_period_end) }}
+                                </dd>
+                            </div>
+
+                            <div v-if="lastSubscription.grace_period_ends_at">
+                                <dt class="text-sm font-medium text-gray-500">
+                                    Fin de la période de grâce
+                                </dt>
+                                <dd class="mt-1 text-sm text-gray-900">
+                                    {{ formatDateTime(lastSubscription.grace_period_ends_at) }}
+                                </dd>
+                            </div>
+                        </dl>
+                    </template>
+
+                    <p
+                        v-else
+                        class="mt-6 text-sm text-gray-700"
+                    >
+                        Aucun abonnement enregistré pour cette installation.
+                    </p>
+                </section>
+
+                <section class="rounded-xl border-2 border-dashed border-gray-200 bg-gray-50/50 p-6 sm:p-8">
+                    <h2 class="text-lg font-semibold text-gray-900">
+                        Accès selon l’abonnement
+                    </h2>
+
+                    <p class="mt-1 text-sm text-gray-500">
+                        Résultat calculé à partir du dernier abonnement — indépendant du statut d’installation.
                     </p>
 
                     <div class="mt-6">
                         <span
-                            class="inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset"
-                            :class="accessBadgeClass(access.status)"
+                            class="inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium"
+                            :class="accessBadgeClass(access)"
                         >
-                            {{ accessPrimaryLabel(access.status) }}
+                            {{ accessPrimaryLabel(access) }}
                         </span>
 
                         <p
-                            v-if="accessDetailLabel(access.status)"
+                            v-if="accessDetailLabel(access)"
                             class="mt-3 text-sm text-gray-700"
                         >
-                            {{ accessDetailLabel(access.status) }}
+                            {{ accessDetailLabel(access) }}
                         </p>
                     </div>
                 </section>
@@ -226,6 +365,10 @@ function formatDateTime(value) {
                     <h2 class="text-lg font-semibold text-gray-900">
                         Base de données
                     </h2>
+
+                    <p class="mt-1 text-sm text-amber-800/90">
+                        Référence uniquement — le Control Center ne se connecte pas actuellement à cette base.
+                    </p>
 
                     <dl class="mt-6 grid gap-6 sm:grid-cols-2">
                         <div>
@@ -265,16 +408,17 @@ function formatDateTime(value) {
 
                         <div>
                             <dt class="text-sm font-medium text-gray-500">
-                                Dernière activité
+                                Dernière présence enregistrée
                             </dt>
                             <dd class="mt-1 text-sm text-gray-900">
                                 {{ formatDateTime(installation.last_seen_at) }}
+                                <span class="mt-1 block text-xs text-gray-500">Saisie manuelle actuellement</span>
                             </dd>
                         </div>
 
                         <div>
                             <dt class="text-sm font-medium text-gray-500">
-                                Date de suspension
+                                Date de suspension (installation)
                             </dt>
                             <dd class="mt-1 text-sm text-gray-900">
                                 {{ formatDateTime(installation.suspended_at) }}
@@ -283,7 +427,7 @@ function formatDateTime(value) {
 
                         <div>
                             <dt class="text-sm font-medium text-gray-500">
-                                Date de terminaison
+                                Date de terminaison (installation)
                             </dt>
                             <dd class="mt-1 text-sm text-gray-900">
                                 {{ formatDateTime(installation.terminated_at) }}
@@ -333,7 +477,7 @@ function formatDateTime(value) {
                             <dt class="text-sm font-medium text-gray-500">
                                 Adresse e-mail
                             </dt>
-                            <dd class="mt-1 text-sm text-gray-900 break-all">
+                            <dd class="mt-1 break-all text-sm text-gray-900">
                                 {{ displayValue(installation.client?.email) }}
                             </dd>
                         </div>

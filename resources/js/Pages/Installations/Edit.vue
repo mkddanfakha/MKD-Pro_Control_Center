@@ -253,7 +253,7 @@ const submit = () => {
 
                 <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">
                     <h2 class="text-lg font-semibold text-gray-900">
-                        Statut et version
+                        Statut de l’installation et version
                     </h2>
 
                     <div class="mt-6 grid gap-6 sm:grid-cols-2">
@@ -262,7 +262,7 @@ const submit = () => {
                                 for="status"
                                 class="block text-sm font-medium text-gray-700"
                             >
-                                Statut
+                                Statut de l’installation
                                 <span class="text-red-600" aria-hidden="true">*</span>
                             </label>
 
@@ -274,16 +274,16 @@ const submit = () => {
                                 :aria-describedby="form.errors.status ? 'status-error' : undefined"
                             >
                                 <option value="active">
-                                    Actif
+                                    Installation active
                                 </option>
                                 <option value="inactive">
-                                    Inactif
+                                    Installation inactive
                                 </option>
                                 <option value="suspended">
-                                    Suspendue
+                                    Installation suspendue
                                 </option>
                                 <option value="terminated">
-                                    Terminée
+                                    Installation terminée
                                 </option>
                             </select>
 
@@ -432,7 +432,7 @@ const submit = () => {
                                 for="last_seen_at"
                                 class="block text-sm font-medium text-gray-700"
                             >
-                                Dernière activité
+                                Dernière présence enregistrée
                             </label>
 
                             <input
@@ -442,8 +442,15 @@ const submit = () => {
                                 type="datetime-local"
                                 :class="inputClass"
                                 :aria-invalid="!!form.errors.last_seen_at"
-                                :aria-describedby="form.errors.last_seen_at ? 'last_seen_at-error' : undefined"
+                                :aria-describedby="form.errors.last_seen_at ? 'last_seen_at-error' : 'last_seen_at-hint'"
                             />
+
+                            <p
+                                id="last_seen_at-hint"
+                                class="mt-2 text-xs text-gray-500"
+                            >
+                                Saisie manuelle actuellement
+                            </p>
 
                             <p
                                 v-if="form.errors.last_seen_at"

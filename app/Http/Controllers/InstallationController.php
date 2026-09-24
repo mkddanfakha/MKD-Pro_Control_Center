@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Client;
 use App\Models\Installation;
+use App\Models\Subscription;
 use App\Services\AuditLogService;
 use App\Services\InstallationAccessService;
 use Illuminate\Http\Request;
@@ -14,6 +15,7 @@ class InstallationController extends Controller
 {
     public function __construct(
         private readonly AuditLogService $auditLogService,
+        private readonly InstallationAccessService $installationAccessService,
     ) {}
 
     /**
@@ -22,9 +24,18 @@ class InstallationController extends Controller
     public function index()
     {
         $installations = Installation::query()
-            ->with('client')
+            ->with([
+                'client',
+                'subscriptions' => fn ($query) => $query->orderByDesc('id'),
+            ])
             ->orderByDesc('id')
-            ->paginate(15);
+            ->paginate(15)
+            ->through(fn (Installation $installation) => array_merge(
+                $this->serializeInstallationForIndex($installation),
+                [
+                    'access' => $this->installationAccessService->accessSummary($installation),
+                ],
+            ));
 
         return Inertia::render('Installations/Index', [
             'installations' => $installations,
@@ -66,16 +77,19 @@ class InstallationController extends Controller
     /**
      * Display the specified resource.
      */
-    public function show(Installation $installation, InstallationAccessService $accessService)
+    public function show(Installation $installation)
     {
-        $installation->load('client');
+        $installation->load([
+            'client',
+            'subscriptions' => fn ($query) => $query->orderByDesc('id'),
+        ]);
+
+        $lastSubscription = $this->installationAccessService->latestSubscription($installation);
 
         return Inertia::render('Installations/Show', [
-            'installation' => $installation,
-            'access' => [
-                'accessible' => $accessService->isAccessible($installation),
-                'status' => $accessService->accessStatus($installation),
-            ],
+            'installation' => $this->serializeInstallationForShow($installation),
+            'access' => $this->installationAccessService->accessSummary($installation),
+            'lastSubscription' => $this->serializeLastSubscription($lastSubscription),
         ]);
     }
 
@@ -136,6 +150,100 @@ class InstallationController extends Controller
         return redirect()
             ->route('installations.index')
             ->with('success', 'Installation supprimée avec succès.');
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function serializeInstallationForIndex(Installation $installation): array
+    {
+        return array_merge(
+            $installation->only([
+                'id',
+                'client_id',
+                'name',
+                'subdomain',
+                'domain',
+                'status',
+                'version',
+                'database_name',
+                'database_host',
+                'installed_at',
+                'last_seen_at',
+                'suspended_at',
+                'terminated_at',
+                'created_at',
+                'updated_at',
+            ]),
+            [
+                'client' => $installation->client?->only([
+                    'id',
+                    'company_name',
+                    'contact_name',
+                ]),
+            ],
+        );
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function serializeInstallationForShow(Installation $installation): array
+    {
+        return array_merge(
+            $installation->only([
+                'id',
+                'client_id',
+                'name',
+                'subdomain',
+                'domain',
+                'status',
+                'version',
+                'database_name',
+                'database_host',
+                'installed_at',
+                'last_seen_at',
+                'suspended_at',
+                'terminated_at',
+                'created_at',
+                'updated_at',
+            ]),
+            [
+                'client' => $installation->client?->only([
+                    'id',
+                    'company_name',
+                    'contact_name',
+                    'phone',
+                    'email',
+                    'address',
+                    'city',
+                    'country',
+                ]),
+            ],
+        );
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function serializeLastSubscription(?Subscription $subscription): ?array
+    {
+        if ($subscription === null) {
+            return null;
+        }
+
+        return $subscription->only([
+            'id',
+            'status',
+            'amount',
+            'currency',
+            'starts_at',
+            'current_period_start',
+            'current_period_end',
+            'grace_period_ends_at',
+            'suspended_at',
+            'terminated_at',
+        ]);
     }
 
     /**

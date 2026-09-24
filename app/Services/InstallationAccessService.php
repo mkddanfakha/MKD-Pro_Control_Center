@@ -14,8 +14,26 @@ class InstallationAccessService
 
     public function accessStatus(Installation $installation): string
     {
-        $subscription = $installation->subscriptions()->latest('id')->first();
+        return $this->accessStatusForSubscription($this->latestSubscription($installation));
+    }
 
+    /**
+     * @return array{accessible: bool, status: string, subscription_status: string|null}
+     */
+    public function accessSummary(Installation $installation): array
+    {
+        $subscription = $this->latestSubscription($installation);
+        $status = $this->accessStatusForSubscription($subscription);
+
+        return [
+            'accessible' => $status === 'accessible',
+            'status' => $status,
+            'subscription_status' => $subscription?->status,
+        ];
+    }
+
+    private function accessStatusForSubscription(?Subscription $subscription): string
+    {
         if ($subscription === null) {
             return 'no_subscription';
         }
@@ -27,5 +45,14 @@ class InstallationAccessService
             Subscription::STATUS_TERMINATED => 'terminated',
             default => 'suspended',
         };
+    }
+
+    public function latestSubscription(Installation $installation): ?Subscription
+    {
+        if ($installation->relationLoaded('subscriptions')) {
+            return $installation->subscriptions->sortByDesc('id')->first();
+        }
+
+        return $installation->subscriptions()->latest('id')->first();
     }
 }
