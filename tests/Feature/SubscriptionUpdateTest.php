@@ -101,19 +101,21 @@ class SubscriptionUpdateTest extends TestCase
     public function test_update_rejects_when_grace_period_conflicts_with_another_non_terminated(): void
     {
         $user = User::factory()->create();
-        $installation = $this->makeInstallation();
+        $installationWithActive = $this->makeInstallation();
+        $otherInstallation = $this->makeInstallation();
 
-        $this->makeSubscriptionOnInstallation($installation, [
+        $this->makeSubscriptionOnInstallation($installationWithActive, [
             'status' => Subscription::STATUS_ACTIVE,
         ]);
 
-        $grace = $this->makeSubscriptionOnInstallation($installation, [
+        $grace = $this->makeSubscriptionOnInstallation($otherInstallation, [
             'status' => Subscription::STATUS_GRACE_PERIOD,
         ]);
 
         $response = $this->actingAs($user)->put(
             route('subscriptions.update', $grace),
             $this->validUpdatePayload($grace, [
+                'installation_id' => $installationWithActive->id,
                 'notes' => 'Tentative de modification',
             ]),
         );
@@ -124,13 +126,14 @@ class SubscriptionUpdateTest extends TestCase
     public function test_update_rejects_when_suspended_conflicts_with_another_non_terminated(): void
     {
         $user = User::factory()->create();
-        $installation = $this->makeInstallation();
+        $installationWithActive = $this->makeInstallation();
+        $otherInstallation = $this->makeInstallation();
 
-        $this->makeSubscriptionOnInstallation($installation, [
+        $this->makeSubscriptionOnInstallation($installationWithActive, [
             'status' => Subscription::STATUS_ACTIVE,
         ]);
 
-        $suspended = $this->makeSubscriptionOnInstallation($installation, [
+        $suspended = $this->makeSubscriptionOnInstallation($otherInstallation, [
             'status' => Subscription::STATUS_SUSPENDED,
             'suspended_at' => '2026-11-01 00:00:00',
         ]);
@@ -138,6 +141,7 @@ class SubscriptionUpdateTest extends TestCase
         $response = $this->actingAs($user)->put(
             route('subscriptions.update', $suspended),
             $this->validUpdatePayload($suspended, [
+                'installation_id' => $installationWithActive->id,
                 'notes' => 'Tentative de modification',
             ]),
         );

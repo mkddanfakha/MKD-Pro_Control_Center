@@ -7,7 +7,9 @@ use App\Models\AuditLog;
 use App\Models\Client;
 use App\Models\Installation;
 use App\Models\Subscription;
+use App\Http\Controllers\SubscriptionController;
 use App\Models\User;
+use App\Services\AuditLogService;
 use App\Services\SubscriptionService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -251,6 +253,38 @@ class SubscriptionStoreTest extends TestCase
 
         $this->assertSame(0, Subscription::query()->count());
         $this->assertSame(0, AuditLog::query()->count());
+    }
+
+    public function test_store_maps_unique_constraint_violation_to_installation_id_validation_error(): void
+    {
+        $user = User::factory()->create();
+        $installation = $this->makeInstallation();
+        $this->makeExistingSubscription($installation, Subscription::STATUS_ACTIVE);
+
+        $subscriptionCount = Subscription::query()->where('installation_id', $installation->id)->count();
+        $auditCountBefore = AuditLog::query()->count();
+
+        $controller = new class(app(AuditLogService::class), app(SubscriptionService::class)) extends SubscriptionController
+        {
+            protected function assertInstallationAllowsNewSubscription(int $installationId): void
+            {
+                // Simule une course concurrente où la validation métier n'a pas vu l'abonnement existant.
+            }
+        };
+
+        $this->app->instance(SubscriptionController::class, $controller);
+
+        $response = $this->actingAs($user)->post(route('subscriptions.store'), [
+            'installation_id' => $installation->id,
+            'starts_at' => '2026-12-01 00:00:00',
+        ]);
+
+        $response->assertSessionHasErrors([
+            'installation_id' => 'Cette installation possède déjà un abonnement non terminé.',
+        ]);
+
+        $this->assertSame($subscriptionCount, Subscription::query()->where('installation_id', $installation->id)->count());
+        $this->assertSame($auditCountBefore, AuditLog::query()->count());
     }
 
     private function assertStoreRejectsWhenNonTerminatedSubscriptionExists(string $status): void

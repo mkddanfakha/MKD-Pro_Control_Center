@@ -7,6 +7,7 @@ use App\Models\Subscription;
 use App\Services\AuditLogService;
 use App\Services\SubscriptionService;
 use DateTimeInterface;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -72,28 +73,34 @@ class SubscriptionController extends Controller
 
         $validated = $request->validate($this->storeValidationRules());
 
-        $subscription = DB::transaction(function () use ($validated) {
-            $this->assertInstallationAllowsNewSubscription((int) $validated['installation_id']);
+        try {
+            $subscription = DB::transaction(function () use ($validated) {
+                $this->assertInstallationAllowsNewSubscription((int) $validated['installation_id']);
 
-            $subscription = Subscription::create([
-                'installation_id' => $validated['installation_id'],
-                'amount' => $validated['amount'],
-                'currency' => $validated['currency'],
-                'status' => Subscription::STATUS_ACTIVE,
-                'starts_at' => $validated['starts_at'],
-                'notes' => $validated['notes'] ?? null,
+                $subscription = Subscription::create([
+                    'installation_id' => $validated['installation_id'],
+                    'amount' => $validated['amount'],
+                    'currency' => $validated['currency'],
+                    'status' => Subscription::STATUS_ACTIVE,
+                    'starts_at' => $validated['starts_at'],
+                    'notes' => $validated['notes'] ?? null,
+                ]);
+
+                $subscription = $this->subscriptionService->createInitialPeriod($subscription);
+
+                $this->auditLogService->record(
+                    'subscription.created',
+                    auditable: $subscription,
+                    newValues: $this->subscriptionAuditSnapshot($subscription),
+                );
+
+                return $subscription;
+            });
+        } catch (UniqueConstraintViolationException) {
+            throw ValidationException::withMessages([
+                'installation_id' => 'Cette installation possède déjà un abonnement non terminé.',
             ]);
-
-            $subscription = $this->subscriptionService->createInitialPeriod($subscription);
-
-            $this->auditLogService->record(
-                'subscription.created',
-                auditable: $subscription,
-                newValues: $this->subscriptionAuditSnapshot($subscription),
-            );
-
-            return $subscription;
-        });
+        }
 
         return redirect()
             ->route('subscriptions.show', $subscription)
@@ -137,18 +144,24 @@ class SubscriptionController extends Controller
 
         $this->assertUpdateBusinessRules($subscription, $validated);
 
-        DB::transaction(function () use ($subscription, $validated) {
-            $oldValues = $this->subscriptionAuditSnapshot($subscription);
+        try {
+            DB::transaction(function () use ($subscription, $validated) {
+                $oldValues = $this->subscriptionAuditSnapshot($subscription);
 
-            $subscription->update($validated);
+                $subscription->update($validated);
 
-            $this->auditLogService->record(
-                'subscription.updated',
-                auditable: $subscription,
-                oldValues: $oldValues,
-                newValues: $this->subscriptionAuditSnapshot($subscription->fresh()),
-            );
-        });
+                $this->auditLogService->record(
+                    'subscription.updated',
+                    auditable: $subscription,
+                    oldValues: $oldValues,
+                    newValues: $this->subscriptionAuditSnapshot($subscription->fresh()),
+                );
+            });
+        } catch (UniqueConstraintViolationException) {
+            throw ValidationException::withMessages([
+                'installation_id' => 'Cette installation possède déjà un abonnement non terminé.',
+            ]);
+        }
 
         return redirect()
             ->route('subscriptions.show', $subscription)
@@ -209,7 +222,7 @@ class SubscriptionController extends Controller
     /**
      * @throws ValidationException
      */
-    private function assertInstallationAllowsNewSubscription(int $installationId): void
+    protected function assertInstallationAllowsNewSubscription(int $installationId): void
     {
         $hasNonTerminatedSubscription = Subscription::query()
             ->where('installation_id', $installationId)
