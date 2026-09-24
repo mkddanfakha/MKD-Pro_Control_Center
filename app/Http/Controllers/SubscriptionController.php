@@ -16,6 +16,15 @@ use Inertia\Response;
 
 class SubscriptionController extends Controller
 {
+    /**
+     * @var list<string>
+     */
+    private const NON_TERMINATED_STATUSES = [
+        Subscription::STATUS_ACTIVE,
+        Subscription::STATUS_GRACE_PERIOD,
+        Subscription::STATUS_SUSPENDED,
+    ];
+
     public function __construct(
         private readonly AuditLogService $auditLogService,
         private readonly SubscriptionService $subscriptionService,
@@ -124,18 +133,22 @@ class SubscriptionController extends Controller
      */
     public function update(Request $request, Subscription $subscription): RedirectResponse
     {
-        $validated = $request->validate($this->validationRules());
+        $validated = $request->validate($this->updateValidationRules());
 
-        $oldValues = $this->subscriptionAuditSnapshot($subscription);
+        $this->assertUpdateBusinessRules($subscription, $validated);
 
-        $subscription->update($validated);
+        DB::transaction(function () use ($subscription, $validated) {
+            $oldValues = $this->subscriptionAuditSnapshot($subscription);
 
-        $this->auditLogService->record(
-            'subscription.updated',
-            auditable: $subscription,
-            oldValues: $oldValues,
-            newValues: $this->subscriptionAuditSnapshot($subscription->fresh()),
-        );
+            $subscription->update($validated);
+
+            $this->auditLogService->record(
+                'subscription.updated',
+                auditable: $subscription,
+                oldValues: $oldValues,
+                newValues: $this->subscriptionAuditSnapshot($subscription->fresh()),
+            );
+        });
 
         return redirect()
             ->route('subscriptions.show', $subscription)
@@ -200,11 +213,7 @@ class SubscriptionController extends Controller
     {
         $hasNonTerminatedSubscription = Subscription::query()
             ->where('installation_id', $installationId)
-            ->whereIn('status', [
-                Subscription::STATUS_ACTIVE,
-                Subscription::STATUS_GRACE_PERIOD,
-                Subscription::STATUS_SUSPENDED,
-            ])
+            ->whereIn('status', self::NON_TERMINATED_STATUSES)
             ->exists();
 
         if ($hasNonTerminatedSubscription) {
@@ -229,9 +238,41 @@ class SubscriptionController extends Controller
     }
 
     /**
+     * @param  array<string, mixed>  $validated
+     *
+     * @throws ValidationException
+     */
+    private function assertUpdateBusinessRules(Subscription $subscription, array $validated): void
+    {
+        if ($subscription->isTerminated() && $validated['status'] !== Subscription::STATUS_TERMINATED) {
+            throw ValidationException::withMessages([
+                'status' => 'Un abonnement terminé ne peut pas être réactivé.',
+            ]);
+        }
+
+        if (! in_array($validated['status'], self::NON_TERMINATED_STATUSES, true)) {
+            return;
+        }
+
+        $resultInstallationId = (int) $validated['installation_id'];
+
+        $hasOtherNonTerminatedSubscription = Subscription::query()
+            ->where('installation_id', $resultInstallationId)
+            ->whereIn('status', self::NON_TERMINATED_STATUSES)
+            ->whereKeyNot($subscription->id)
+            ->exists();
+
+        if ($hasOtherNonTerminatedSubscription) {
+            throw ValidationException::withMessages([
+                'installation_id' => 'Cette installation possède déjà un abonnement non terminé.',
+            ]);
+        }
+    }
+
+    /**
      * @return array<string, mixed>
      */
-    private function validationRules(): array
+    private function updateValidationRules(): array
     {
         return [
             'installation_id' => 'required|integer|exists:installations,id',
@@ -239,8 +280,8 @@ class SubscriptionController extends Controller
             'currency' => 'required|string|size:3',
             'status' => 'required|string|in:active,grace_period,suspended,terminated',
             'starts_at' => 'nullable|date',
-            'current_period_start' => 'nullable|date',
-            'current_period_end' => 'nullable|date|after_or_equal:current_period_start',
+            'current_period_start' => 'nullable|date|required_with:current_period_end',
+            'current_period_end' => 'nullable|date|required_with:current_period_start|after_or_equal:current_period_start',
             'grace_period_ends_at' => 'nullable|date',
             'suspended_at' => 'nullable|date',
             'terminated_at' => 'nullable|date',

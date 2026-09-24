@@ -51,6 +51,12 @@ const installationSubtitle = computed(() => {
     return `${name} — ${subdomain}`;
 });
 
+const isTerminated = computed(() => props.subscription.status === 'terminated');
+
+const periodEndRequired = computed(() => form.current_period_start !== '');
+
+const periodStartRequired = computed(() => form.current_period_end !== '');
+
 const form = useForm({
     installation_id: props.subscription.installation_id ?? '',
     amount: props.subscription.amount ?? 0,
@@ -113,7 +119,8 @@ const submit = () => {
                     </h2>
 
                     <p class="mt-1 text-sm text-gray-500">
-                        Choisissez l'installation MKD-Pro concernée par cet abonnement.
+                        Choisissez l'installation MKD-Pro concernée par cet abonnement. Le changement
+                        d'installation peut être refusé si la cible possède déjà un abonnement non terminé.
                     </p>
 
                     <div class="mt-6">
@@ -131,7 +138,7 @@ const submit = () => {
                             :class="inputClass"
                             :disabled="form.processing"
                             :aria-invalid="!!form.errors.installation_id"
-                            :aria-describedby="form.errors.installation_id ? 'installation_id-error' : undefined"
+                            :aria-describedby="form.errors.installation_id ? 'installation_id-error' : 'installation_id-help'"
                         >
                             <option value="">
                                 Sélectionner une installation
@@ -146,6 +153,14 @@ const submit = () => {
                         </select>
 
                         <p
+                            id="installation_id-help"
+                            class="mt-2 text-xs text-gray-500"
+                        >
+                            Un seul abonnement non terminé est autorisé par installation ; le serveur
+                            valide ce choix.
+                        </p>
+
+                        <p
                             v-if="form.errors.installation_id"
                             id="installation_id-error"
                             class="mt-2 text-sm text-red-600"
@@ -157,7 +172,7 @@ const submit = () => {
 
                 <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">
                     <h2 class="text-lg font-semibold text-gray-900">
-                        Tarification et statut
+                        Tarification et statut de l'abonnement
                     </h2>
 
                     <div class="mt-6 grid gap-6 sm:grid-cols-2">
@@ -243,11 +258,31 @@ const submit = () => {
                                 for="status"
                                 class="block text-sm font-medium text-gray-700"
                             >
-                                Statut
+                                Statut de l'abonnement
                                 <span class="text-red-600" aria-hidden="true">*</span>
                             </label>
 
+                            <template v-if="isTerminated">
+                                <input
+                                    id="status"
+                                    type="text"
+                                    value="Terminé (définitif)"
+                                    readonly
+                                    class="mt-2 block w-full cursor-not-allowed rounded-lg border border-gray-300 bg-gray-50 px-4 py-3 text-sm text-gray-700 outline-none"
+                                    aria-describedby="status-terminated-help"
+                                />
+
+                                <p
+                                    id="status-terminated-help"
+                                    class="mt-2 text-sm text-gray-600"
+                                >
+                                    Cet abonnement est terminé et ne peut pas être réactivé. Pour une
+                                    nouvelle période commerciale, créez un nouvel abonnement.
+                                </p>
+                            </template>
+
                             <select
+                                v-else
                                 id="status"
                                 v-model="form.status"
                                 :class="inputClass"
@@ -286,7 +321,8 @@ const submit = () => {
                     </h2>
 
                     <p class="mt-1 text-sm text-gray-500">
-                        Dates optionnelles du cycle d'abonnement.
+                        Le début et la fin de période doivent être renseignés ensemble, ou laissés vides
+                        tous les deux. Les dates ne sont pas recalculées automatiquement ici.
                     </p>
 
                     <div class="mt-6 grid gap-6 sm:grid-cols-2">
@@ -295,7 +331,7 @@ const submit = () => {
                                 for="starts_at"
                                 class="block text-sm font-medium text-gray-700"
                             >
-                                Date de début
+                                Début commercial
                             </label>
 
                             <input
@@ -323,7 +359,12 @@ const submit = () => {
                                 for="current_period_start"
                                 class="block text-sm font-medium text-gray-700"
                             >
-                                Début de la période actuelle
+                                Début de période
+                                <span
+                                    v-if="periodStartRequired"
+                                    class="text-red-600"
+                                    aria-hidden="true"
+                                >*</span>
                             </label>
 
                             <input
@@ -331,10 +372,11 @@ const submit = () => {
                                 v-model="form.current_period_start"
                                 name="current_period_start"
                                 type="datetime-local"
+                                :required="periodStartRequired"
                                 :class="inputClass"
                                 :disabled="form.processing"
                                 :aria-invalid="!!form.errors.current_period_start"
-                                :aria-describedby="form.errors.current_period_start ? 'current_period_start-error' : undefined"
+                                :aria-describedby="form.errors.current_period_start ? 'current_period_start-error' : 'period-pair-help'"
                             />
 
                             <p
@@ -351,7 +393,12 @@ const submit = () => {
                                 for="current_period_end"
                                 class="block text-sm font-medium text-gray-700"
                             >
-                                Fin de la période actuelle
+                                Fin de période
+                                <span
+                                    v-if="periodEndRequired"
+                                    class="text-red-600"
+                                    aria-hidden="true"
+                                >*</span>
                             </label>
 
                             <input
@@ -359,17 +406,18 @@ const submit = () => {
                                 v-model="form.current_period_end"
                                 name="current_period_end"
                                 type="datetime-local"
+                                :required="periodEndRequired"
                                 :class="inputClass"
                                 :disabled="form.processing"
                                 :aria-invalid="!!form.errors.current_period_end"
-                                :aria-describedby="form.errors.current_period_end ? 'current_period_end-error' : 'current_period_end-help'"
+                                :aria-describedby="form.errors.current_period_end ? 'current_period_end-error' : 'period-pair-help'"
                             />
 
                             <p
-                                id="current_period_end-help"
+                                id="period-pair-help"
                                 class="mt-2 text-xs text-gray-500"
                             >
-                                Date à laquelle la période mensuelle actuelle se termine.
+                                Renseignez les deux dates de période ou effacez-les toutes les deux.
                             </p>
 
                             <p
@@ -386,7 +434,7 @@ const submit = () => {
                                 for="grace_period_ends_at"
                                 class="block text-sm font-medium text-gray-700"
                             >
-                                Fin de la période de grâce
+                                Fin de période de grâce
                             </label>
 
                             <input
