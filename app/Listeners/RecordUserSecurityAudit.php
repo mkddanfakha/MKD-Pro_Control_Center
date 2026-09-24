@@ -4,6 +4,7 @@ namespace App\Listeners;
 
 use App\Models\User;
 use App\Services\AuditLogService;
+use App\Services\UserSecurityFailureAuditor;
 use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Support\Facades\Auth;
@@ -13,6 +14,7 @@ use Laravel\Fortify\Events\RecoveryCodesGenerated;
 use Laravel\Fortify\Events\TwoFactorAuthenticationConfirmed;
 use Laravel\Fortify\Events\TwoFactorAuthenticationDisabled;
 use Laravel\Fortify\Events\TwoFactorAuthenticationEnabled;
+use Laravel\Fortify\Events\TwoFactorAuthenticationFailed;
 use Laravel\Fortify\Fortify;
 use Laravel\Passkeys\Events\PasskeyDeleted;
 use Laravel\Passkeys\Events\PasskeyRegistered;
@@ -23,7 +25,20 @@ class RecordUserSecurityAudit
 {
     public function __construct(
         private readonly AuditLogService $auditLogService,
+        private readonly UserSecurityFailureAuditor $failureAuditor,
     ) {}
+
+    public function handleTwoFactorAuthenticationFailed(TwoFactorAuthenticationFailed $event): void
+    {
+        if (! $event->user instanceof User) {
+            return;
+        }
+
+        $this->failureAuditor->record(
+            'auth.two_factor_failed',
+            auditable: $event->user,
+        );
+    }
 
     public function handlePasswordUpdatedViaController(PasswordUpdatedViaController $event): void
     {

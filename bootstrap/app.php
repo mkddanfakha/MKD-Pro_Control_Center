@@ -20,4 +20,22 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
         );
+
+        $exceptions->renderable(function (\Illuminate\Validation\ValidationException $exception, Request $request) {
+            if (! $request->routeIs('passkey.login', 'passkey.confirm')) {
+                return null;
+            }
+
+            $auditor = app(\App\Services\UserSecurityFailureAuditor::class);
+            $user = $request->user();
+            $userModel = $user instanceof \App\Models\User ? $user : null;
+
+            if ($request->routeIs('passkey.login')) {
+                $auditor->record('user.passkey_login_failed', auditable: $userModel);
+            } elseif ($request->routeIs('passkey.confirm')) {
+                $auditor->record('user.passkey_confirmation_failed', auditable: $userModel);
+            }
+
+            return null;
+        });
     })->create();

@@ -2,10 +2,19 @@
 
 namespace App\Providers;
 
+use App\Actions\Fortify\ConfirmTwoFactorAuthentication;
 use App\Actions\Fortify\CreateNewUser;
 use App\Actions\Fortify\ResetUserPassword;
 use App\Actions\Fortify\UpdateUserPassword;
 use App\Actions\Fortify\UpdateUserProfileInformation;
+use App\Http\Responses\Fortify\FailedPasswordResetLinkRequestResponse as AppFailedPasswordResetLinkRequestResponse;
+use App\Http\Responses\Fortify\FailedPasswordResetResponse as AppFailedPasswordResetResponse;
+use App\Http\Responses\Fortify\FailedTwoFactorLoginResponse as AppFailedTwoFactorLoginResponse;
+use Illuminate\Contracts\Container\Container;
+use Laravel\Fortify\Actions\ConfirmTwoFactorAuthentication as FortifyConfirmTwoFactorAuthentication;
+use Laravel\Fortify\Contracts\FailedPasswordResetLinkRequestResponse as FailedPasswordResetLinkRequestResponseContract;
+use Laravel\Fortify\Contracts\FailedPasswordResetResponse as FailedPasswordResetResponseContract;
+use Laravel\Fortify\Contracts\FailedTwoFactorLoginResponse as FailedTwoFactorLoginResponseContract;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
@@ -21,7 +30,7 @@ class FortifyServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->bind(FortifyConfirmTwoFactorAuthentication::class, ConfirmTwoFactorAuthentication::class);
     }
 
     /**
@@ -52,5 +61,26 @@ class FortifyServiceProvider extends ServiceProvider
                 ($credentialId ?: $request->session()->getId()).'|'.$request->ip()
             );
         });
+
+        $this->registerSecurityFailureResponseBindings();
+    }
+
+    private function registerSecurityFailureResponseBindings(): void
+    {
+        $this->app->bind(FailedPasswordResetResponseContract::class, function (Container $app, array $parameters) {
+            return new AppFailedPasswordResetResponse(
+                $parameters['status'] ?? '',
+                $app->make(\App\Services\UserSecurityFailureAuditor::class),
+            );
+        });
+
+        $this->app->bind(FailedPasswordResetLinkRequestResponseContract::class, function (Container $app, array $parameters) {
+            return new AppFailedPasswordResetLinkRequestResponse(
+                $parameters['status'] ?? '',
+                $app->make(\App\Services\UserSecurityFailureAuditor::class),
+            );
+        });
+
+        $this->app->singleton(FailedTwoFactorLoginResponseContract::class, AppFailedTwoFactorLoginResponse::class);
     }
 }

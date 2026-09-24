@@ -4,6 +4,7 @@ namespace App\Actions\Fortify;
 
 use App\Models\User;
 use App\Services\AuditLogService;
+use App\Services\UserSecurityFailureAuditor;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
@@ -14,6 +15,7 @@ class UpdateUserProfileInformation implements UpdatesUserProfileInformation
 {
     public function __construct(
         private readonly AuditLogService $auditLogService,
+        private readonly UserSecurityFailureAuditor $failureAuditor,
     ) {}
     /**
      * Validate and update the given user's profile information.
@@ -24,17 +26,26 @@ class UpdateUserProfileInformation implements UpdatesUserProfileInformation
      */
     public function update(User $user, array $input): void
     {
-        Validator::make($input, [
-            'name' => ['required', 'string', 'max:255'],
+        try {
+            Validator::make($input, [
+                'name' => ['required', 'string', 'max:255'],
 
-            'email' => [
-                'required',
-                'string',
-                'email',
-                'max:255',
-                Rule::unique('users')->ignore($user->id),
-            ],
-        ])->validateWithBag('updateProfileInformation');
+                'email' => [
+                    'required',
+                    'string',
+                    'email',
+                    'max:255',
+                    Rule::unique('users')->ignore($user->id),
+                ],
+            ])->validateWithBag('updateProfileInformation');
+        } catch (ValidationException $exception) {
+            $this->failureAuditor->record(
+                'user.profile_update_failed',
+                auditable: $user,
+            );
+
+            throw $exception;
+        }
 
         $oldValues = $this->profileAuditSnapshot($user);
 
