@@ -223,11 +223,18 @@ class PaymentRenewalTest extends TestCase
      */
     private function makePayment(Subscription $subscription, array $attributes = []): Payment
     {
-        return Payment::query()->create(array_merge([
+        $data = array_merge([
             'subscription_id' => $subscription->id,
             'amount' => 15000,
             'currency' => 'XOF',
             'status' => Payment::STATUS_PAID,
-        ], $attributes));
+            'paid_at' => '2026-10-15 12:00:00',
+        ], $attributes);
+
+        if (in_array($data['status'], [Payment::STATUS_PENDING, Payment::STATUS_FAILED], true)) {
+            $data['paid_at'] = null;
+        }
+
+        return Payment::query()->create($data);
     }
 }

@@ -97,6 +97,7 @@ class PaymentAuditTest extends TestCase
             'amount' => 15000,
             'currency' => 'XOF',
             'status' => Payment::STATUS_PAID,
+            'paid_at' => '2026-10-01 12:00:00',
         ]);
 
         $paymentId = $payment->id;
@@ -130,6 +131,7 @@ class PaymentAuditTest extends TestCase
             'amount' => 15000,
             'currency' => 'XOF',
             'status' => Payment::STATUS_PAID,
+            'paid_at' => '2026-10-01 12:00:00',
             'period_start' => '2026-10-01 00:00:00',
             'period_end' => '2026-10-31 23:59:59',
         ]);
@@ -180,6 +182,7 @@ class PaymentAuditTest extends TestCase
             'amount' => 15000,
             'currency' => 'XOF',
             'status' => Payment::STATUS_PAID,
+            'paid_at' => '2026-10-01 12:00:00',
             'period_start' => '2026-10-01 00:00:00',
             'period_end' => '2026-10-31 23:59:59',
         ]);
@@ -203,6 +206,7 @@ class PaymentAuditTest extends TestCase
             'amount' => 15000,
             'currency' => 'XOF',
             'status' => Payment::STATUS_PAID,
+            'paid_at' => '2026-10-01 12:00:00',
             'period_start' => '2026-10-01 00:00:00',
             'period_end' => '2026-10-31 23:59:59',
         ]);

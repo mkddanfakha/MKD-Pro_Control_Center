@@ -102,6 +102,7 @@ class SubscriptionServiceTest extends TestCase
             'amount' => 15000,
             'currency' => 'XOF',
             'status' => Payment::STATUS_PAID,
+            'paid_at' => '2026-10-15 12:00:00',
         ]);
 
         $renewed = $this->service->renew($subscription, $payment);
@@ -163,6 +164,7 @@ class SubscriptionServiceTest extends TestCase
             'amount' => 15000,
             'currency' => 'XOF',
             'status' => Payment::STATUS_PAID,
+            'paid_at' => '2026-10-15 12:00:00',
         ]);
 
         $this->expectException(SubscriptionRenewalException::class);
@@ -185,6 +187,7 @@ class SubscriptionServiceTest extends TestCase
             'amount' => 15000,
             'currency' => 'XOF',
             'status' => Payment::STATUS_PAID,
+            'paid_at' => '2026-10-15 12:00:00',
         ]);
 
         $renewed = $this->service->renew($subscription, $payment);
