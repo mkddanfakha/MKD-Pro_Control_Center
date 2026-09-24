@@ -1,6 +1,7 @@
 <script setup>
 import AdminLayout from '@/Layouts/AdminLayout.vue';
 import { Head, Link, useForm } from '@inertiajs/vue3';
+import { computed, watch } from 'vue';
 
 defineProps({
     subscriptions: {
@@ -46,6 +47,17 @@ const form = useForm({
     reference: '',
     notes: '',
 });
+
+const paidAtRequired = computed(() => form.status === 'paid' || form.status === 'refunded');
+
+watch(
+    () => form.status,
+    (status) => {
+        if (status === 'pending' || status === 'failed') {
+            form.paid_at = '';
+        }
+    },
+);
 
 const inputClass =
     'mt-2 block w-full rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none transition focus:border-gray-900 focus:ring-2 focus:ring-gray-200';
@@ -308,6 +320,11 @@ const submit = () => {
                                 class="block text-sm font-medium text-gray-700"
                             >
                                 Date de paiement
+                                <span
+                                    v-if="paidAtRequired"
+                                    class="text-red-600"
+                                    aria-hidden="true"
+                                >*</span>
                             </label>
 
                             <input
@@ -316,6 +333,7 @@ const submit = () => {
                                 name="paid_at"
                                 type="datetime-local"
                                 :class="inputClass"
+                                :required="paidAtRequired"
                                 :disabled="form.processing"
                                 :aria-invalid="!!form.errors.paid_at"
                                 :aria-describedby="form.errors.paid_at ? 'paid_at-error' : undefined"

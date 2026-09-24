@@ -10,6 +10,8 @@ use App\Services\SubscriptionService;
 use DateTimeInterface;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -156,6 +158,12 @@ class PaymentController extends Controller
     {
         $validated = $request->validate($this->validationRules());
 
+        if ($payment->hasRenewalBeenApplied() && $validated['status'] !== Payment::STATUS_PAID) {
+            throw ValidationException::withMessages([
+                'status' => 'Un paiement déjà utilisé pour un renouvellement doit conserver le statut payé.',
+            ]);
+        }
+
         $oldValues = $this->paymentAuditSnapshot($payment);
 
         $payment->update($validated);
@@ -281,7 +289,18 @@ class PaymentController extends Controller
             'currency' => 'required|string|size:3',
             'status' => 'required|in:pending,paid,failed,refunded',
             'due_at' => 'nullable|date',
-            'paid_at' => 'nullable|date',
+            'paid_at' => [
+                'nullable',
+                'date',
+                Rule::requiredIf(fn () => in_array(request()->input('status'), [
+                    Payment::STATUS_PAID,
+                    Payment::STATUS_REFUNDED,
+                ], true)),
+                Rule::prohibitedIf(fn () => in_array(request()->input('status'), [
+                    Payment::STATUS_PENDING,
+                    Payment::STATUS_FAILED,
+                ], true)),
+            ],
             'period_start' => 'nullable|date',
             'period_end' => 'nullable|date|after_or_equal:period_start',
             'payment_method' => 'nullable|string|max:255',
