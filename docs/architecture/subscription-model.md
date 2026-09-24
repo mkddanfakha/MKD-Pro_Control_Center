@@ -148,6 +148,13 @@ Inspection en **lecture seule** (environnement de test / dev) :
 
 Ces lignes sont des **données de test** ; **aucune correction automatique** n’a été appliquée lors de l’inspection.
 
+**Décision C (documentation) — pas de rétro-correction :** la politique d’initialisation ci-dessous **ne corrige pas** les données existantes. En l’état actuel de la base de test :
+
+- la subscription **#2** reste **`active` sans période** (`current_period_start` / `current_period_end` absents) ;
+- la subscription **#3** reste en **`grace_period` sans `grace_period_ends_at`**.
+
+Leur traitement fera l’objet d’**une tâche distincte**.
+
 ---
 
 ## Décisions produit
@@ -179,13 +186,43 @@ Règles :
 
 **Non imposé aujourd’hui (décision documentée uniquement) :** cette politique **n’est pas encore appliquée** par la **base de données**, le **modèle Eloquent**, le **`SubscriptionController`**, ni un **service** dédié — le CRUD et le schéma actuels permettent encore plusieurs lignes non terminées.
 
-### Décisions encore ouvertes
+#### C. Initialisation à la création — **décision prise**
 
-Le point suivant **doit encore être tranché** par le propriétaire du projet.
+Règles métier pour une **nouvelle** subscription commerciale :
 
-#### C. Création initiale
+1. Une nouvelle subscription doit être créée avec une **période initiale exploitable** (lifecycle et renouvellement par paiement supposent des dates de période cohérentes).
+2. **`starts_at`** représente le **véritable début commercial** de l’abonnement et **doit être renseigné** à la création.
+3. La période initiale est calculée **automatiquement** à partir de **`starts_at`** via la logique centralisée **`SubscriptionService::createInitialPeriod()`** (calendrier mensuel : `calculateNextPeriod`).
+4. **`current_period_start`** et **`current_period_end`** doivent être **initialisés ensemble**. Une **période partielle** (une seule des deux dates, ou saisie incohérente) **n’est pas** une création valide.
+5. Une nouvelle subscription commerciale est créée avec le statut initial **`active`**.
+6. **`grace_period`** et **`suspended`** sont des états issus du **cycle de vie** (ou de décisions ops ultérieures) ; ce ne sont **pas** les statuts normaux d’une **nouvelle** création.
+7. Une subscription **`terminated`** ne doit **pas** être réactivée ; après terminaison, une **nouvelle** subscription est créée (décision **A**).
+8. Lors de l’**implémentation**, la création devra être **atomique** : enregistrement de la subscription **et** initialisation de la période dans la **même transaction**.
+9. L’audit **`subscription.created`** devra refléter l’**état initial finalisé** de la subscription, **avec** sa période initiale renseignée (après `createInitialPeriod()`, pas un enregistrement sans période).
+10. La décision **B** s’applique : une nouvelle subscription ne peut être créée que s’il **n’existe aucune** subscription **non `terminated`** pour l’installation.
 
-Lors de la création d’une subscription (UI / API admin), faut-il **automatiquement** initialiser la première période mensuelle via **`SubscriptionService::createInitialPeriod()`** (aujourd’hui disponible dans le service mais **non** appelé par `SubscriptionController::store`) ?
+**Non imposé aujourd’hui (décision documentée uniquement) :** cette politique **n’est pas encore implémentée** techniquement — `SubscriptionController::store()` crée encore la ligne sans appeler `createInitialPeriod()`, les dates restent optionnelles en validation, et le statut initial peut encore être choisi librement dans le formulaire.
+
+### Décisions encore ouvertes (modèle d’abonnement)
+
+**Aucune.** Les décisions **A**, **B** et **C** concernant le modèle d’abonnement par installation sont **actées** dans ce document. Les écarts avec le code ou la base relèvent d’**implémentations futures**, pas de décisions produit ouvertes.
+
+---
+
+## Conséquences d’implémentation futures
+
+Lorsqu’une tâche d’implémentation appliquera les décisions **B** et **C**, elle devra notamment prévoir :
+
+- **Validation** de **`starts_at`** obligatoire à la création ;
+- **Interdiction** des **périodes partielles** (`current_period_start` / `current_period_end` saisis séparément ou incohérents avec la règle C) ;
+- **Statut initial** **`active`** imposé (ou forcé) pour une nouvelle subscription commerciale ;
+- **Appel** à **`SubscriptionService::createInitialPeriod()`** après création, lorsque les dates de période ne sont pas déjà définies conformément à la règle ;
+- **Transaction** englobant création + initialisation de période ;
+- **Audit** `subscription.created` **après** finalisation (période incluse dans le snapshot) ;
+- **Règle d’unicité B** : refus de création si une subscription non `terminated` existe déjà pour l’installation ;
+- **Alignement** ultérieur de **`InstallationAccessService`** avec la subscription courante (non `terminated`) plutôt que `max(id)` seul.
+
+Cette section **ne prescrit pas** l’ordre ni le périmètre exact d’une unique tâche code — elle liste les sujets techniques identifiés.
 
 ---
 
