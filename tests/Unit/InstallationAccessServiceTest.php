@@ -59,6 +59,8 @@ class InstallationAccessServiceTest extends TestCase
         ]);
 
         $this->assertFalse($this->service->isAccessible($installation));
+        $this->assertSame('no_subscription', $this->service->accessStatus($installation));
+        $this->assertNull($this->service->latestSubscription($installation));
         $this->assertInstallationUnchangedAfterAccessCheck($installation);
     }
 
@@ -77,7 +79,8 @@ class InstallationAccessServiceTest extends TestCase
         ]);
 
         $this->assertFalse($this->service->isAccessible($installation));
-        $this->assertSame('suspended', $this->service->accessStatus($installation));
+        $this->assertSame('no_subscription', $this->service->accessStatus($installation));
+        $this->assertNull($this->service->latestSubscription($installation));
         $this->assertInstallationUnchangedAfterAccessCheck($installation);
     }
 
@@ -100,11 +103,11 @@ class InstallationAccessServiceTest extends TestCase
         $this->assertSame('accessible', $this->service->accessStatus($active));
         $this->assertSame('accessible', $this->service->accessStatus($grace));
         $this->assertSame('suspended', $this->service->accessStatus($suspended));
-        $this->assertSame('terminated', $this->service->accessStatus($terminated));
+        $this->assertSame('no_subscription', $this->service->accessStatus($terminated));
         $this->assertSame('no_subscription', $this->service->accessStatus($none));
     }
 
-    public function test_latest_subscription_by_id_is_used_when_multiple_exist(): void
+    public function test_non_terminated_subscription_is_selected_when_terminated_also_exists(): void
     {
         $installation = $this->makeInstallation();
 
@@ -124,9 +127,83 @@ class InstallationAccessServiceTest extends TestCase
 
         $installation = $installation->fresh();
 
+        $this->assertSame(Subscription::STATUS_ACTIVE, $this->service->latestSubscription($installation)?->status);
         $this->assertTrue($this->service->isAccessible($installation));
         $this->assertSame('accessible', $this->service->accessStatus($installation));
         $this->assertInstallationUnchangedAfterAccessCheck($installation);
+    }
+
+    public function test_multiple_terminated_subscriptions_without_non_terminated_yield_no_subscription(): void
+    {
+        $installation = $this->makeInstallation();
+
+        Subscription::query()->create([
+            'installation_id' => $installation->id,
+            'amount' => 10000,
+            'currency' => 'XOF',
+            'status' => Subscription::STATUS_TERMINATED,
+        ]);
+
+        Subscription::query()->create([
+            'installation_id' => $installation->id,
+            'amount' => 15000,
+            'currency' => 'XOF',
+            'status' => Subscription::STATUS_TERMINATED,
+        ]);
+
+        $installation = $installation->fresh();
+
+        $this->assertNull($this->service->latestSubscription($installation));
+        $this->assertFalse($this->service->isAccessible($installation));
+        $this->assertSame('no_subscription', $this->service->accessStatus($installation));
+    }
+
+    public function test_terminated_plus_grace_period_selects_grace_period(): void
+    {
+        $installation = $this->makeInstallationWithSubscriptions([
+            ['status' => Subscription::STATUS_TERMINATED],
+            ['status' => Subscription::STATUS_GRACE_PERIOD],
+        ]);
+
+        $this->assertSame(Subscription::STATUS_GRACE_PERIOD, $this->service->latestSubscription($installation)?->status);
+        $this->assertTrue($this->service->isAccessible($installation));
+    }
+
+    public function test_terminated_plus_suspended_selects_suspended(): void
+    {
+        $installation = $this->makeInstallationWithSubscriptions([
+            ['status' => Subscription::STATUS_TERMINATED],
+            ['status' => Subscription::STATUS_SUSPENDED],
+        ]);
+
+        $this->assertSame(Subscription::STATUS_SUSPENDED, $this->service->latestSubscription($installation)?->status);
+        $this->assertFalse($this->service->isAccessible($installation));
+        $this->assertSame('suspended', $this->service->accessStatus($installation));
+    }
+
+    public function test_newer_terminated_subscription_does_not_mask_active_subscription(): void
+    {
+        $installation = $this->makeInstallation();
+
+        Subscription::query()->create([
+            'installation_id' => $installation->id,
+            'amount' => 15000,
+            'currency' => 'XOF',
+            'status' => Subscription::STATUS_ACTIVE,
+        ]);
+
+        Subscription::query()->create([
+            'installation_id' => $installation->id,
+            'amount' => 15000,
+            'currency' => 'XOF',
+            'status' => Subscription::STATUS_TERMINATED,
+        ]);
+
+        $installation = $installation->fresh();
+
+        $this->assertSame(Subscription::STATUS_ACTIVE, $this->service->latestSubscription($installation)?->status);
+        $this->assertTrue($this->service->isAccessible($installation));
+        $this->assertSame('accessible', $this->service->accessStatus($installation));
     }
 
     private function makeInstallation(): Installation
@@ -158,6 +235,25 @@ class InstallationAccessServiceTest extends TestCase
             'currency' => 'XOF',
             'status' => Subscription::STATUS_ACTIVE,
         ], $subscriptionAttributes));
+
+        return $installation->fresh();
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $subscriptionsAttributes
+     */
+    private function makeInstallationWithSubscriptions(array $subscriptionsAttributes): Installation
+    {
+        $installation = $this->makeInstallation();
+
+        foreach ($subscriptionsAttributes as $attributes) {
+            Subscription::query()->create(array_merge([
+                'installation_id' => $installation->id,
+                'amount' => 15000,
+                'currency' => 'XOF',
+                'status' => Subscription::STATUS_ACTIVE,
+            ], $attributes));
+        }
 
         return $installation->fresh();
     }

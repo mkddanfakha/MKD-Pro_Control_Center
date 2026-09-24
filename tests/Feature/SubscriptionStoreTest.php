@@ -133,6 +133,98 @@ class SubscriptionStoreTest extends TestCase
         $this->assertSame('2026-11-30 23:59:59', $subscription->current_period_end->format('Y-m-d H:i:s'));
     }
 
+    public function test_store_allows_creation_when_installation_has_no_subscription(): void
+    {
+        $user = User::factory()->create();
+        $installation = $this->makeInstallation();
+
+        $response = $this->actingAs($user)->post(route('subscriptions.store'), [
+            'installation_id' => $installation->id,
+            'starts_at' => '2026-10-01 00:00:00',
+        ]);
+
+        $response->assertRedirect();
+        $this->assertSame(1, Subscription::query()->where('installation_id', $installation->id)->count());
+    }
+
+    public function test_store_rejects_creation_when_installation_has_active_subscription(): void
+    {
+        $this->assertStoreRejectsWhenNonTerminatedSubscriptionExists(Subscription::STATUS_ACTIVE);
+    }
+
+    public function test_store_rejects_creation_when_installation_has_grace_period_subscription(): void
+    {
+        $this->assertStoreRejectsWhenNonTerminatedSubscriptionExists(Subscription::STATUS_GRACE_PERIOD);
+    }
+
+    public function test_store_rejects_creation_when_installation_has_suspended_subscription(): void
+    {
+        $this->assertStoreRejectsWhenNonTerminatedSubscriptionExists(Subscription::STATUS_SUSPENDED);
+    }
+
+    public function test_store_allows_creation_when_installation_has_only_terminated_subscription(): void
+    {
+        $user = User::factory()->create();
+        $installation = $this->makeInstallation();
+        $this->makeExistingSubscription($installation, Subscription::STATUS_TERMINATED, [
+            'terminated_at' => '2026-09-01 00:00:00',
+        ]);
+
+        $response = $this->actingAs($user)->post(route('subscriptions.store'), [
+            'installation_id' => $installation->id,
+            'starts_at' => '2026-10-01 00:00:00',
+        ]);
+
+        $response->assertRedirect();
+
+        $subscriptions = Subscription::query()
+            ->where('installation_id', $installation->id)
+            ->orderBy('id')
+            ->get();
+
+        $this->assertCount(2, $subscriptions);
+        $this->assertSame(Subscription::STATUS_TERMINATED, $subscriptions[0]->status);
+        $this->assertSame(Subscription::STATUS_ACTIVE, $subscriptions[1]->status);
+        $this->assertNotNull($subscriptions[1]->current_period_start);
+        $this->assertNotNull($subscriptions[1]->current_period_end);
+
+        $this->assertSame(1, AuditLog::query()->where('action', 'subscription.created')->count());
+    }
+
+    public function test_store_allows_creation_when_installation_has_multiple_terminated_subscriptions(): void
+    {
+        $user = User::factory()->create();
+        $installation = $this->makeInstallation();
+        $this->makeExistingSubscription($installation, Subscription::STATUS_TERMINATED);
+        $this->makeExistingSubscription($installation, Subscription::STATUS_TERMINATED);
+
+        $response = $this->actingAs($user)->post(route('subscriptions.store'), [
+            'installation_id' => $installation->id,
+            'starts_at' => '2026-10-01 00:00:00',
+        ]);
+
+        $response->assertRedirect();
+        $this->assertSame(3, Subscription::query()->where('installation_id', $installation->id)->count());
+        $this->assertSame(1, AuditLog::query()->where('action', 'subscription.created')->count());
+    }
+
+    public function test_store_rejects_creation_when_terminated_and_active_subscriptions_exist(): void
+    {
+        $user = User::factory()->create();
+        $installation = $this->makeInstallation();
+        $this->makeExistingSubscription($installation, Subscription::STATUS_TERMINATED);
+        $this->makeExistingSubscription($installation, Subscription::STATUS_ACTIVE);
+
+        $response = $this->actingAs($user)->post(route('subscriptions.store'), [
+            'installation_id' => $installation->id,
+            'starts_at' => '2026-12-01 00:00:00',
+        ]);
+
+        $response->assertSessionHasErrors('installation_id');
+        $this->assertSame(2, Subscription::query()->where('installation_id', $installation->id)->count());
+        $this->assertSame(0, AuditLog::query()->where('action', 'subscription.created')->count());
+    }
+
     public function test_store_rolls_back_subscription_and_audit_when_initial_period_fails(): void
     {
         $user = User::factory()->create();
@@ -161,6 +253,25 @@ class SubscriptionStoreTest extends TestCase
         $this->assertSame(0, AuditLog::query()->count());
     }
 
+    private function assertStoreRejectsWhenNonTerminatedSubscriptionExists(string $status): void
+    {
+        $user = User::factory()->create();
+        $installation = $this->makeInstallation();
+        $this->makeExistingSubscription($installation, $status);
+
+        $response = $this->actingAs($user)->post(route('subscriptions.store'), [
+            'installation_id' => $installation->id,
+            'starts_at' => '2026-12-01 00:00:00',
+        ]);
+
+        $response->assertSessionHasErrors([
+            'installation_id' => 'Cette installation possède déjà un abonnement non terminé.',
+        ]);
+
+        $this->assertSame(1, Subscription::query()->where('installation_id', $installation->id)->count());
+        $this->assertSame(0, AuditLog::query()->where('action', 'subscription.created')->count());
+    }
+
     private function makeClient(): Client
     {
         return Client::query()->create([
@@ -178,5 +289,18 @@ class SubscriptionStoreTest extends TestCase
             'subdomain' => 'sub-'.uniqid(),
             'status' => 'active',
         ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $attributes
+     */
+    private function makeExistingSubscription(Installation $installation, string $status, array $attributes = []): Subscription
+    {
+        return Subscription::query()->create(array_merge([
+            'installation_id' => $installation->id,
+            'amount' => 15000,
+            'currency' => 'XOF',
+            'status' => $status,
+        ], $attributes));
     }
 }

@@ -77,7 +77,8 @@ class InstallationShowAccessTest extends TestCase
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
                 ->where('access.accessible', false)
-                ->where('access.status', 'terminated'));
+                ->where('access.status', 'no_subscription')
+                ->where('access.subscription_status', null));
     }
 
     public function test_show_includes_no_subscription_access_state(): void

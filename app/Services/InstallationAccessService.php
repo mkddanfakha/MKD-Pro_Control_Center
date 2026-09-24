@@ -7,6 +7,15 @@ use App\Models\Subscription;
 
 class InstallationAccessService
 {
+    /**
+     * @var list<string>
+     */
+    private const NON_TERMINATED_STATUSES = [
+        Subscription::STATUS_ACTIVE,
+        Subscription::STATUS_GRACE_PERIOD,
+        Subscription::STATUS_SUSPENDED,
+    ];
+
     public function isAccessible(Installation $installation): bool
     {
         return $this->accessStatus($installation) === 'accessible';
@@ -50,9 +59,15 @@ class InstallationAccessService
     public function latestSubscription(Installation $installation): ?Subscription
     {
         if ($installation->relationLoaded('subscriptions')) {
-            return $installation->subscriptions->sortByDesc('id')->first();
+            return $installation->subscriptions
+                ->whereIn('status', self::NON_TERMINATED_STATUSES)
+                ->sortByDesc('id')
+                ->first();
         }
 
-        return $installation->subscriptions()->latest('id')->first();
+        return $installation->subscriptions()
+            ->whereIn('status', self::NON_TERMINATED_STATUSES)
+            ->latest('id')
+            ->first();
     }
 }

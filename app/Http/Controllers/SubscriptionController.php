@@ -10,6 +10,7 @@ use DateTimeInterface;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -63,6 +64,8 @@ class SubscriptionController extends Controller
         $validated = $request->validate($this->storeValidationRules());
 
         $subscription = DB::transaction(function () use ($validated) {
+            $this->assertInstallationAllowsNewSubscription((int) $validated['installation_id']);
+
             $subscription = Subscription::create([
                 'installation_id' => $validated['installation_id'],
                 'amount' => $validated['amount'],
@@ -188,6 +191,27 @@ class SubscriptionController extends Controller
         }
 
         return $snapshot;
+    }
+
+    /**
+     * @throws ValidationException
+     */
+    private function assertInstallationAllowsNewSubscription(int $installationId): void
+    {
+        $hasNonTerminatedSubscription = Subscription::query()
+            ->where('installation_id', $installationId)
+            ->whereIn('status', [
+                Subscription::STATUS_ACTIVE,
+                Subscription::STATUS_GRACE_PERIOD,
+                Subscription::STATUS_SUSPENDED,
+            ])
+            ->exists();
+
+        if ($hasNonTerminatedSubscription) {
+            throw ValidationException::withMessages([
+                'installation_id' => 'Cette installation possède déjà un abonnement non terminé.',
+            ]);
+        }
     }
 
     /**
