@@ -103,6 +103,13 @@ class PaymentController extends Controller
         try {
             $this->subscriptionService->renewFromPayment($payment);
         } catch (SubscriptionServiceException $exception) {
+            $this->auditLogService->record(
+                'payment.renewal_failed',
+                auditable: $payment,
+                result: 'failure',
+                errorMessage: 'Le renouvellement de l’abonnement a échoué.',
+            );
+
             return redirect()
                 ->route('payments.show', $payment)
                 ->with('error', $exception->getMessage());

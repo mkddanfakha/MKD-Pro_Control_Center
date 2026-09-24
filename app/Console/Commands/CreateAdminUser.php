@@ -60,7 +60,7 @@ class CreateAdminUser extends Command
                     'email' => $email,
                 ],
                 result: 'failure',
-                errorMessage: $exception->getMessage(),
+                errorMessage: 'L’opération de création de l’administrateur a échoué.',
             );
 
             $this->error('Impossible de créer l’administrateur : '.$exception->getMessage());

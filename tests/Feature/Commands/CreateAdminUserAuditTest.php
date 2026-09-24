@@ -91,7 +91,8 @@ class CreateAdminUserAuditTest extends TestCase
         $this->assertSame('Admin Échec', $log->new_values['name']);
         $this->assertSame('fail-audit@example.com', $log->new_values['email']);
         $this->assertSame(['name', 'email'], array_keys($log->new_values));
-        $this->assertSame('Échec simulé de persistance', $log->error_message);
+        $this->assertSame('L’opération de création de l’administrateur a échoué.', $log->error_message);
+        $this->assertStringNotContainsString('Échec simulé de persistance', (string) $log->error_message);
         $this->assertNull($log->old_values);
         $this->assertNull($log->auditable_type);
         $this->assertNull($log->auditable_id);

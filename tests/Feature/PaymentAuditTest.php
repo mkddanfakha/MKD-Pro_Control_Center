@@ -219,7 +219,7 @@ class PaymentAuditTest extends TestCase
         $this->assertSame(1, AuditLog::query()->where('action', 'payment.renewal_applied')->count());
     }
 
-    public function test_failed_renewal_does_not_create_renewal_audit(): void
+    public function test_failed_renewal_creates_renewal_failed_audit_without_technical_message(): void
     {
         $user = User::factory()->create();
 
@@ -235,12 +235,42 @@ class PaymentAuditTest extends TestCase
             'status' => Payment::STATUS_PENDING,
         ]);
 
+        $subscriptionBefore = $subscription->fresh();
+        $paymentBefore = $payment->fresh();
+
         $response = $this->actingAs($user)->post(route('payments.renew-subscription', $payment));
 
         $response->assertRedirect(route('payments.show', $payment));
         $response->assertSessionHas('error');
 
         $this->assertSame(0, AuditLog::query()->where('action', 'payment.renewal_applied')->count());
+        $this->assertSame(1, AuditLog::query()->where('action', 'payment.renewal_failed')->count());
+
+        $log = AuditLog::query()->where('action', 'payment.renewal_failed')->sole();
+
+        $this->assertSame('failure', $log->result);
+        $this->assertSame(Payment::class, $log->auditable_type);
+        $this->assertSame($payment->id, $log->auditable_id);
+        $this->assertNull($log->old_values);
+        $this->assertNull($log->new_values);
+        $this->assertSame('Le renouvellement de l’abonnement a échoué.', $log->error_message);
+
+        $encoded = json_encode([
+            $log->old_values,
+            $log->new_values,
+            $log->error_message,
+        ], JSON_THROW_ON_ERROR);
+
+        $technicalMessage = 'Seul un paiement au statut payé permet le renouvellement.';
+        $this->assertStringNotContainsString($technicalMessage, $encoded);
+
+        $payment->refresh();
+        $subscription->refresh();
+
+        $this->assertSame($paymentBefore->status, $payment->status);
+        $this->assertNull($payment->renewal_applied_at);
+        $this->assertSame($subscriptionBefore->current_period_start?->format('Y-m-d H:i:s'), $subscription->current_period_start?->format('Y-m-d H:i:s'));
+        $this->assertSame($subscriptionBefore->current_period_end?->format('Y-m-d H:i:s'), $subscription->current_period_end?->format('Y-m-d H:i:s'));
     }
 
     /**

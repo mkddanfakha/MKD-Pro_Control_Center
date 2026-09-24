@@ -149,7 +149,11 @@ class SubscriptionLifecycleSyncAuditTest extends TestCase
         $this->assertSame('failure', $log->result);
         $this->assertSame($subscription->id, $log->auditable_id);
         $this->assertSame(Subscription::class, $log->auditable_type);
-        $this->assertNotNull($log->error_message);
+        $this->assertSame('La synchronisation du cycle de vie de l’abonnement a échoué.', $log->error_message);
+        $this->assertStringNotContainsString(
+            'Impossible de synchroniser un abonnement en période de grâce sans date de fin de grâce.',
+            (string) $log->error_message,
+        );
         $this->assertNull($log->old_values);
         $this->assertNull($log->new_values);
         $this->assertSame(1, AuditLog::query()->where('action', 'subscription.lifecycle_sync_failed')->count());

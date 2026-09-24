@@ -108,7 +108,7 @@ class SyncSubscriptionLifecycle extends Command
         } catch (SubscriptionLifecycleException $exception) {
             $stats['errors']++;
 
-            $this->recordLifecycleSyncFailure($subscriptionBeforeSync, $exception);
+            $this->recordLifecycleSyncFailure($subscriptionBeforeSync);
 
             if (! $quiet) {
                 $this->warn("⚠ Abonnement #{$subscriptionId} : erreur — {$exception->getMessage()}");
@@ -116,7 +116,7 @@ class SyncSubscriptionLifecycle extends Command
         } catch (Throwable $exception) {
             $stats['errors']++;
 
-            $this->recordLifecycleSyncFailure($subscriptionBeforeSync, $exception);
+            $this->recordLifecycleSyncFailure($subscriptionBeforeSync);
 
             if (! $quiet) {
                 $this->error("✗ Abonnement #{$subscriptionId} : erreur inattendue — {$exception->getMessage()}");
@@ -124,13 +124,13 @@ class SyncSubscriptionLifecycle extends Command
         }
     }
 
-    private function recordLifecycleSyncFailure(Subscription $subscription, Throwable $exception): void
+    private function recordLifecycleSyncFailure(Subscription $subscription): void
     {
         $this->auditLogService->record(
             'subscription.lifecycle_sync_failed',
             auditable: $subscription,
             result: 'failure',
-            errorMessage: $exception->getMessage(),
+            errorMessage: 'La synchronisation du cycle de vie de l’abonnement a échoué.',
         );
     }
 
