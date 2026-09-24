@@ -8,6 +8,14 @@ const mobileMenuOpen = ref(false);
 
 const user = computed(() => page.props.auth?.user);
 
+function isNavItemActive(item) {
+    if (item.activePath) {
+        return page.url.split('?')[0] === item.activePath;
+    }
+
+    return page.url === item.href;
+}
+
 const navigation = [
     {
         label: 'Dashboard',
@@ -36,6 +44,11 @@ const navigation = [
     {
         label: 'Affectations des modules',
         href: '/installation-modules',
+    },
+    {
+        label: "Journal d'audit",
+        href: '/audit-logs',
+        activePath: '/audit-logs',
     },
     {
         label: 'Sauvegardes',
@@ -87,7 +100,7 @@ const navigation = [
                     :href="item.href"
                     class="block rounded-lg px-4 py-3 text-sm font-medium transition"
                     :class="
-                        page.url === item.href
+                        isNavItemActive(item)
                             ? 'bg-white text-gray-950'
                             : 'text-gray-300 hover:bg-white/10 hover:text-white'
                     "
