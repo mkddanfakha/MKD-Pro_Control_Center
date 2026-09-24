@@ -150,26 +150,33 @@ Ces lignes sont des **données de test** ; **aucune correction automatique** n�
 
 ---
 
-## Décisions produit restantes
+## Décisions produit
 
-Les points suivants **doivent encore être tranchés** par le propriétaire du projet. Ce document **ne tranche pas** à sa place.
+### Décisions actées
 
-### A. Après `terminated`
+#### A. Après `terminated` — **décision prise** (option A retenue)
 
-Lorsqu’un abonnement est **terminé**, que doit-on autoriser ?
+Une subscription passée à **`terminated`** est **définitivement terminée** :
 
-- Création d’une **nouvelle** subscription pour réabonnement (nouvelle ligne) ;
-- **Réactivation** ou modification d’une subscription existante `terminated` ;
-- **Autre** règle explicitement définie.
+- Elle **ne peut plus être renouvelée** ni **réactivée** (aligné avec le comportement actuel de `SubscriptionService::renew()`).
+- Si le client **reprend ultérieurement** son abonnement, une **nouvelle** subscription est **créée** pour ce **nouveau cycle commercial** (nouvelle ligne `subscriptions`).
+- L’**ancienne** subscription et ses **payments** associés **restent conservés** comme **historique** (pas de suppression implicite).
+- Cette règle correspond à l’**option A** identifiée lors de l’inspection Task 36 (nouvelle subscription après terminaison, pas de réactivation de la ligne terminée).
 
-### B. Politique d’unicité
+*Note :* la création de la nouvelle subscription après `terminated` relève du processus admin / produit ; le code CRUD permet déjà plusieurs lignes par installation — les garde-fous d’unicité relèvent de la décision **B** (encore ouverte).
+
+### Décisions encore ouvertes
+
+Les points suivants **doivent encore être tranchés** par le propriétaire du projet.
+
+#### B. Politique d’unicité
 
 Faut-il imposer, par installation :
 
 - **Une seule** subscription **non terminée** à la fois ;
 - **Autre** règle (ex. une seule `active`, historique en `terminated` uniquement, etc.).
 
-### C. Création initiale
+#### C. Création initiale
 
 Lors de la création d’une subscription (UI / API admin), faut-il **automatiquement** initialiser la première période mensuelle via **`SubscriptionService::createInitialPeriod()`** (aujourd’hui disponible dans le service mais **non** appelé par `SubscriptionController::store`) ?
 
