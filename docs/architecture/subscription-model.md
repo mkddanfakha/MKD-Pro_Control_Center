@@ -118,9 +118,9 @@ Créer une nouvelle subscription par mois **n’est pas** le modèle retenu : le
 | Contraintes DB | **Aucune** unicité « une subscription non terminée par installation » ; **aucune** interdiction de plusieurs `active` |
 | Données (inspection 24/09/2026) | 3 installations, 2 subscriptions, **aucune** installation avec plusieurs subscriptions |
 
-**Modèle métier cible :** une **subscription courante** par installation.
+**Modèle métier cible :** une **subscription courante** (non `terminated`) par installation, avec plusieurs subscriptions **`terminated`** possibles en historique (voir décision **B** actée).
 
-**Écart connu :** le schéma autorise plusieurs lignes ; une **future tâche** devra **empêcher** ou **gérer explicitement** la création d’une seconde subscription **non terminée** (validation, contrainte, ou règle de sélection documentée). **Cette tâche ne l’implémente pas.**
+**Écart connu :** le schéma autorise encore plusieurs lignes non terminées ; une **future tâche** devra **imposer** la politique d’unicité documentée (validation, contrainte, sélection d’accès). **Cette documentation ne l’implémente pas** (cf. § Décisions actées — B).
 
 ---
 
@@ -128,9 +128,9 @@ Créer une nouvelle subscription par mois **n’est pas** le modèle retenu : le
 
 Aujourd’hui, **`InstallationAccessService::latestSubscription()`** retourne la subscription avec le **`id` le plus élevé** pour l’installation (`max(id)`).
 
-Cette implémentation est **provisoire** : elle n’encode pas encore la règle métier « subscription courante » (ex. priorité au dernier enregistrement **non** `terminated`).
+Cette implémentation est **provisoire** : elle n’encode pas encore la politique d’unicité (**décision B** — une seule subscription non `terminated` par installation).
 
-Une **tâche ultérieure** devra aligner la sélection avec la règle « subscription courante » une fois les décisions produit ci-dessous actées. **Ne pas modifier le service dans le cadre de la seule documentation.**
+Une **tâche ultérieure** devra aligner la sélection (et la création) avec cette règle, afin de **ne plus dépendre** du choix arbitraire **`max(id)`** pour déterminer la subscription courante. **Ne pas modifier le service dans le cadre de la seule documentation.**
 
 ---
 
@@ -163,18 +163,25 @@ Une subscription passée à **`terminated`** est **définitivement terminée** :
 - L’**ancienne** subscription et ses **payments** associés **restent conservés** comme **historique** (pas de suppression implicite).
 - Cette règle correspond à l’**option A** identifiée lors de l’inspection Task 36 (nouvelle subscription après terminaison, pas de réactivation de la ligne terminée).
 
-*Note :* la création de la nouvelle subscription après `terminated` relève du processus admin / produit ; le code CRUD permet déjà plusieurs lignes par installation — les garde-fous d’unicité relèvent de la décision **B** (encore ouverte).
+#### B. Politique d’unicité — **décision prise**
+
+Une installation peut avoir **plusieurs subscriptions historiques**, mais **une seule subscription non `terminated` à la fois**.
+
+Règles :
+
+1. Plusieurs subscriptions **`terminated`** pour la **même** installation sont **autorisées** (historique de cycles commerciaux clos).
+2. Pour une installation donnée, il ne doit exister **qu’une seule** subscription parmi les statuts **`active`**, **`grace_period`** ou **`suspended`** (ensemble des statuts « non terminés »).
+3. Une **nouvelle** subscription ne peut être **créée** que lorsqu’il **n’existe aucune** subscription non `terminated` pour cette installation (typiquement : après `terminated`, ou première souscription).
+4. Une subscription **`suspended`** reste la **subscription courante** et peut être **renouvelée** selon les règles actuelles (`SubscriptionService::renew` / `renewFromPayment`).
+5. Une subscription **`terminated`** ne peut **plus** être réactivée ni renouvelée (cohérent avec la décision **A**).
+6. Lorsqu’un client **revient** après une subscription `terminated`, une **nouvelle** subscription **peut** être créée (nouveau cycle).
+7. Cette règle vise notamment à **supprimer la dépendance métier** au choix arbitraire **`max(id)`** pour identifier la subscription courante : la courante est la subscription **non `terminated`** (unique lorsque la règle est respectée).
+
+**Non imposé aujourd’hui (décision documentée uniquement) :** cette politique **n’est pas encore appliquée** par la **base de données**, le **modèle Eloquent**, le **`SubscriptionController`**, ni un **service** dédié — le CRUD et le schéma actuels permettent encore plusieurs lignes non terminées.
 
 ### Décisions encore ouvertes
 
-Les points suivants **doivent encore être tranchés** par le propriétaire du projet.
-
-#### B. Politique d’unicité
-
-Faut-il imposer, par installation :
-
-- **Une seule** subscription **non terminée** à la fois ;
-- **Autre** règle (ex. une seule `active`, historique en `terminated` uniquement, etc.).
+Le point suivant **doit encore être tranché** par le propriétaire du projet.
 
 #### C. Création initiale
 
