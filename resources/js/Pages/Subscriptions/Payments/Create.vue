@@ -3,7 +3,7 @@ import AdminLayout from '@/Layouts/AdminLayout.vue';
 import { Head, Link, useForm } from '@inertiajs/vue3';
 import { computed, watch } from 'vue';
 
-defineProps({
+const props = defineProps({
     subscriptions: {
         type: Array,
         required: true,
@@ -49,6 +49,26 @@ const form = useForm({
 });
 
 const paidAtRequired = computed(() => form.status === 'paid' || form.status === 'refunded');
+
+const selectedSubscription = computed(() =>
+    props.subscriptions.find((subscription) => String(subscription.id) === String(form.subscription_id)) ?? null,
+);
+
+watch(
+    () => form.subscription_id,
+    (subscriptionId) => {
+        const subscription = props.subscriptions.find(
+            (item) => String(item.id) === String(subscriptionId),
+        );
+
+        if (!subscription) {
+            return;
+        }
+
+        form.amount = subscription.amount ?? form.amount;
+        form.currency = subscription.currency ?? form.currency;
+    },
+);
 
 watch(
     () => form.status,
@@ -168,6 +188,16 @@ const submit = () => {
                                 Montant
                                 <span class="text-red-600" aria-hidden="true">*</span>
                             </label>
+
+                            <p
+                                v-if="selectedSubscription"
+                                id="amount-expected-help"
+                                class="mt-1 text-sm text-gray-500"
+                            >
+                                Montant attendu pour cet abonnement :
+                                {{ selectedSubscription.amount }}
+                                {{ selectedSubscription.currency }}
+                            </p>
 
                             <div class="mt-2 flex items-center gap-3">
                                 <input

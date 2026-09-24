@@ -172,6 +172,99 @@ class SubscriptionServiceTest extends TestCase
         $this->service->renew($subscription, $payment);
     }
 
+    public function test_renew_rejects_payment_with_lower_amount_than_subscription(): void
+    {
+        $subscription = $this->makeSubscription([
+            'amount' => 16000,
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        $payment = Payment::query()->create([
+            'subscription_id' => $subscription->id,
+            'amount' => 15000,
+            'currency' => 'XOF',
+            'status' => Payment::STATUS_PAID,
+            'paid_at' => '2026-10-15 12:00:00',
+        ]);
+
+        $this->expectException(SubscriptionRenewalException::class);
+        $this->expectExceptionMessage('montant du paiement');
+
+        $this->service->renew($subscription, $payment);
+    }
+
+    public function test_renew_rejects_payment_with_higher_amount_than_subscription(): void
+    {
+        $subscription = $this->makeSubscription([
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        $payment = Payment::query()->create([
+            'subscription_id' => $subscription->id,
+            'amount' => 16000,
+            'currency' => 'XOF',
+            'status' => Payment::STATUS_PAID,
+            'paid_at' => '2026-10-15 12:00:00',
+        ]);
+
+        $this->expectException(SubscriptionRenewalException::class);
+        $this->expectExceptionMessage('montant du paiement');
+
+        $this->service->renew($subscription, $payment);
+    }
+
+    public function test_renew_rejects_payment_with_different_currency(): void
+    {
+        $subscription = $this->makeSubscription([
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        $payment = Payment::query()->create([
+            'subscription_id' => $subscription->id,
+            'amount' => 15000,
+            'currency' => 'EUR',
+            'status' => Payment::STATUS_PAID,
+            'paid_at' => '2026-10-15 12:00:00',
+        ]);
+
+        $this->expectException(SubscriptionRenewalException::class);
+        $this->expectExceptionMessage('devise du paiement');
+
+        $this->service->renew($subscription, $payment);
+    }
+
+    public function test_can_renew_from_payment_requires_matching_amount_and_currency(): void
+    {
+        $subscription = $this->makeSubscription([
+            'amount' => 16000,
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        $mismatch = Payment::query()->create([
+            'subscription_id' => $subscription->id,
+            'amount' => 15000,
+            'currency' => 'XOF',
+            'status' => Payment::STATUS_PAID,
+            'paid_at' => '2026-10-15 12:00:00',
+        ]);
+
+        $this->assertFalse($this->service->canRenewFromPayment($mismatch));
+
+        $match = Payment::query()->create([
+            'subscription_id' => $subscription->id,
+            'amount' => 16000,
+            'currency' => 'XOF',
+            'status' => Payment::STATUS_PAID,
+            'paid_at' => '2026-10-15 12:00:00',
+        ]);
+
+        $this->assertTrue($this->service->canRenewFromPayment($match));
+    }
+
     public function test_renew_resets_grace_period_ends_at(): void
     {
         $subscription = $this->makeSubscription([

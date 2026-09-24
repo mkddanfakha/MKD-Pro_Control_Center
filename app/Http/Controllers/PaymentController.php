@@ -55,6 +55,8 @@ class PaymentController extends Controller
     {
         $validated = $request->validate($this->validationRules());
 
+        $this->assertValidatedPaymentMatchesSubscription($validated);
+
         $payment = Payment::create($validated);
 
         $this->auditLogService->record(
@@ -163,6 +165,9 @@ class PaymentController extends Controller
                 'status' => 'Un paiement déjà utilisé pour un renouvellement doit conserver le statut payé.',
             ]);
         }
+
+        $this->assertRenewalAppliedPaymentImmutableFields($payment, $validated);
+        $this->assertValidatedPaymentMatchesSubscription($validated);
 
         $oldValues = $this->paymentAuditSnapshot($payment);
 
@@ -276,6 +281,93 @@ class PaymentController extends Controller
             ])
             ->orderByDesc('id')
             ->get(['id', 'amount', 'currency', 'status', 'installation_id']);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    /**
+     * @param  array<string, mixed>  $validated
+     */
+    private function assertValidatedPaymentMatchesSubscription(array $validated): void
+    {
+        $subscription = Subscription::query()->find($validated['subscription_id']);
+
+        if ($subscription === null) {
+            return;
+        }
+
+        $errors = [];
+
+        if ((int) $validated['amount'] !== (int) $subscription->amount) {
+            $errors['amount'] = 'Le montant doit correspondre exactement au montant de l\'abonnement.';
+        }
+
+        if ((string) $validated['currency'] !== (string) $subscription->currency) {
+            $errors['currency'] = 'La devise doit correspondre exactement à la devise de l\'abonnement.';
+        }
+
+        if ($errors !== []) {
+            throw ValidationException::withMessages($errors);
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $validated
+     */
+    private function assertRenewalAppliedPaymentImmutableFields(Payment $payment, array $validated): void
+    {
+        if (! $payment->hasRenewalBeenApplied()) {
+            return;
+        }
+
+        $errors = [];
+
+        if ((int) $validated['subscription_id'] !== (int) $payment->subscription_id) {
+            $errors['subscription_id'] = 'L\'abonnement ne peut pas être modifié après un renouvellement appliqué.';
+        }
+
+        if ((int) $validated['amount'] !== (int) $payment->amount) {
+            $errors['amount'] = 'Le montant ne peut pas être modifié après un renouvellement appliqué.';
+        }
+
+        if ((string) $validated['currency'] !== (string) $payment->currency) {
+            $errors['currency'] = 'La devise ne peut pas être modifiée après un renouvellement appliqué.';
+        }
+
+        if ($this->normalizedRequestDate($validated['period_start'] ?? null) !== $this->normalizedPaymentDate($payment->period_start)) {
+            $errors['period_start'] = 'La date de début de période ne peut pas être modifiée après un renouvellement appliqué.';
+        }
+
+        if ($this->normalizedRequestDate($validated['period_end'] ?? null) !== $this->normalizedPaymentDate($payment->period_end)) {
+            $errors['period_end'] = 'La date de fin de période ne peut pas être modifiée après un renouvellement appliqué.';
+        }
+
+        if ($errors !== []) {
+            throw ValidationException::withMessages($errors);
+        }
+    }
+
+    private function normalizedRequestDate(mixed $value): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        return (string) $value;
+    }
+
+    private function normalizedPaymentDate(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        if ($value instanceof DateTimeInterface) {
+            return $value->format('Y-m-d H:i:s');
+        }
+
+        return (string) $value;
     }
 
     /**

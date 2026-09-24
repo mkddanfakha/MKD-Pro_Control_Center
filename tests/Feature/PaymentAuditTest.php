@@ -22,7 +22,7 @@ class PaymentAuditTest extends TestCase
 
         $payload = [
             'subscription_id' => $subscription->id,
-            'amount' => 18000,
+            'amount' => 15000,
             'currency' => 'XOF',
             'status' => Payment::STATUS_PENDING,
             'reference' => 'PAY-001',
@@ -41,7 +41,7 @@ class PaymentAuditTest extends TestCase
         $this->assertSame(Payment::class, $log->auditable_type);
         $this->assertSame($payment->id, $log->auditable_id);
         $this->assertNull($log->old_values);
-        $this->assertSame(18000, $log->new_values['amount']);
+        $this->assertSame(15000, $log->new_values['amount']);
         $this->assertSame(Payment::STATUS_PENDING, $log->new_values['status']);
         $this->assertSame($subscription->id, $log->new_values['subscription_id']);
     }
@@ -62,7 +62,7 @@ class PaymentAuditTest extends TestCase
 
         $response = $this->actingAs($user)->put(route('payments.update', $payment), [
             'subscription_id' => $subscription->id,
-            'amount' => 20000,
+            'amount' => 15000,
             'currency' => 'XOF',
             'status' => Payment::STATUS_PAID,
             'paid_at' => '2026-10-15 12:00:00',
@@ -74,13 +74,13 @@ class PaymentAuditTest extends TestCase
 
         $payment->refresh();
 
-        $this->assertSame(20000, $payment->amount);
+        $this->assertSame(15000, $payment->amount);
         $this->assertSame(Payment::STATUS_PAID, $payment->status);
 
         $log = AuditLog::query()->where('action', 'payment.updated')->sole();
 
         $this->assertSame(15000, $log->old_values['amount']);
-        $this->assertSame(20000, $log->new_values['amount']);
+        $this->assertSame(15000, $log->new_values['amount']);
         $this->assertSame(Payment::STATUS_PENDING, $log->old_values['status']);
         $this->assertSame(Payment::STATUS_PAID, $log->new_values['status']);
         $this->assertSame('REF-OLD', $log->old_values['reference']);

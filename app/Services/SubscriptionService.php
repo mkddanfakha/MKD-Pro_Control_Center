@@ -186,6 +186,7 @@ class SubscriptionService
         }
 
         $this->assertPaymentValidForRenewal($subscription, $payment);
+        $this->assertPaymentAmountAndCurrencyMatchSubscription($subscription, $payment);
         $this->assertPaymentPeriodCoversCurrentSubscriptionPeriod($subscription, $payment);
 
         $nextPeriodStart = Carbon::parse($subscription->current_period_end)->addSecond()->startOfDay();
@@ -213,6 +214,7 @@ class SubscriptionService
         }
 
         $this->assertPaymentValidForRenewal($subscription, $payment);
+        $this->assertPaymentAmountAndCurrencyMatchSubscription($subscription, $payment);
         $this->assertPaymentPeriodCoversCurrentSubscriptionPeriod($subscription, $payment);
     }
 
@@ -279,6 +281,20 @@ class SubscriptionService
 
         if (! $payment->isPaid()) {
             throw new SubscriptionRenewalException('Seul un paiement au statut payé permet le renouvellement.');
+        }
+    }
+
+    /**
+     * @throws SubscriptionRenewalException
+     */
+    private function assertPaymentAmountAndCurrencyMatchSubscription(Subscription $subscription, Payment $payment): void
+    {
+        if ((int) $payment->amount !== (int) $subscription->amount) {
+            throw new SubscriptionRenewalException('Le montant du paiement ne correspond pas au montant de l\'abonnement.');
+        }
+
+        if ((string) $payment->currency !== (string) $subscription->currency) {
+            throw new SubscriptionRenewalException('La devise du paiement ne correspond pas à la devise de l\'abonnement.');
         }
     }
 

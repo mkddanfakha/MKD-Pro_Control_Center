@@ -7,6 +7,7 @@ use App\Models\Client;
 use App\Models\Installation;
 use App\Models\Payment;
 use App\Models\Subscription;
+use App\Models\AuditLog;
 use App\Models\User;
 use App\Services\SubscriptionService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -192,6 +193,146 @@ class PaymentRenewalTest extends TestCase
         $this->assertSame('2026-11-01 00:00:00', $subscription->fresh()->current_period_start->format('Y-m-d H:i:s'));
     }
 
+    public function test_renewal_is_allowed_when_amount_and_currency_match_subscription(): void
+    {
+        $subscription = $this->makeSubscription([
+            'amount' => 16000,
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        $payment = $this->makePayment($subscription, [
+            'amount' => 16000,
+            'currency' => 'XOF',
+            'status' => Payment::STATUS_PAID,
+        ]);
+
+        $this->assertTrue($this->service->canRenewFromPayment($payment));
+        $this->assertNotEmpty($this->service->previewRenewalFromPayment($payment));
+
+        $this->service->renewFromPayment($payment);
+
+        $this->assertNotNull($payment->fresh()->renewal_applied_at);
+    }
+
+    public function test_renewal_is_rejected_when_payment_amount_is_lower_than_subscription(): void
+    {
+        $subscription = $this->makeSubscription([
+            'amount' => 16000,
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        $payment = $this->makePayment($subscription, [
+            'amount' => 15000,
+            'status' => Payment::STATUS_PAID,
+        ]);
+
+        $this->assertFalse($this->service->canRenewFromPayment($payment));
+
+        $this->expectException(SubscriptionRenewalException::class);
+        $this->expectExceptionMessage('montant du paiement');
+
+        $this->service->renewFromPayment($payment);
+    }
+
+    public function test_renewal_is_rejected_when_payment_amount_is_higher_than_subscription(): void
+    {
+        $subscription = $this->makeSubscription([
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        $payment = $this->makePayment($subscription, [
+            'amount' => 16000,
+            'status' => Payment::STATUS_PAID,
+        ]);
+
+        $this->expectException(SubscriptionRenewalException::class);
+        $this->expectExceptionMessage('montant du paiement');
+
+        $this->service->renewFromPayment($payment);
+    }
+
+    public function test_renewal_is_rejected_when_payment_currency_differs_from_subscription(): void
+    {
+        $subscription = $this->makeSubscription([
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        $payment = $this->makePayment($subscription, [
+            'currency' => 'EUR',
+            'status' => Payment::STATUS_PAID,
+        ]);
+
+        $this->expectException(SubscriptionRenewalException::class);
+        $this->expectExceptionMessage('devise du paiement');
+
+        $this->service->renewFromPayment($payment);
+    }
+
+    public function test_existing_inconsistent_payment_like_dev_number_three_is_rejected_for_renewal(): void
+    {
+        $user = User::factory()->create();
+
+        $subscription = $this->makeSubscription([
+            'amount' => 16000,
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        $payment = $this->makePayment($subscription, [
+            'amount' => 15000,
+            'status' => Payment::STATUS_PAID,
+        ]);
+
+        $periodBefore = $subscription->current_period_end->format('Y-m-d H:i:s');
+
+        $response = $this->actingAs($user)->post(route('payments.renew-subscription', $payment));
+
+        $response->assertRedirect(route('payments.show', $payment));
+        $response->assertSessionHas('error');
+
+        $subscription->refresh();
+        $payment->refresh();
+
+        $this->assertSame($periodBefore, $subscription->current_period_end->format('Y-m-d H:i:s'));
+        $this->assertNull($payment->renewal_applied_at);
+        $this->assertSame(0, AuditLog::query()->where('action', 'payment.renewal_applied')->count());
+        $this->assertSame(1, AuditLog::query()->where('action', 'payment.renewal_failed')->count());
+    }
+
+    public function test_amount_mismatch_does_not_partially_update_subscription_period(): void
+    {
+        $subscription = $this->makeSubscription([
+            'amount' => 16000,
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        $payment = $this->makePayment($subscription, [
+            'amount' => 15000,
+            'status' => Payment::STATUS_PAID,
+        ]);
+
+        $periodStartBefore = $subscription->current_period_start->format('Y-m-d H:i:s');
+        $periodEndBefore = $subscription->current_period_end->format('Y-m-d H:i:s');
+
+        try {
+            $this->service->renewFromPayment($payment);
+            $this->fail('Expected SubscriptionRenewalException was not thrown.');
+        } catch (SubscriptionRenewalException) {
+            // expected
+        }
+
+        $subscription->refresh();
+
+        $this->assertSame($periodStartBefore, $subscription->current_period_start->format('Y-m-d H:i:s'));
+        $this->assertSame($periodEndBefore, $subscription->current_period_end->format('Y-m-d H:i:s'));
+        $this->assertNull($payment->fresh()->renewal_applied_at);
+    }
+
     /**
      * @param  array<string, mixed>  $attributes
      */
@@ -225,8 +366,8 @@ class PaymentRenewalTest extends TestCase
     {
         $data = array_merge([
             'subscription_id' => $subscription->id,
-            'amount' => 15000,
-            'currency' => 'XOF',
+            'amount' => $subscription->amount,
+            'currency' => $subscription->currency,
             'status' => Payment::STATUS_PAID,
             'paid_at' => '2026-10-15 12:00:00',
         ], $attributes);
