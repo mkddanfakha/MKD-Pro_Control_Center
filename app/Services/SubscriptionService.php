@@ -54,15 +54,13 @@ class SubscriptionService
             throw new SubscriptionPeriodException('Impossible d\'initialiser une période pour un abonnement terminé.');
         }
 
-        $anchor = $subscription->starts_at !== null
-            ? Carbon::parse($subscription->starts_at)
-            : now();
+        if ($subscription->starts_at === null) {
+            throw new SubscriptionPeriodException('La date de début commerciale (starts_at) est requise pour initialiser la période.');
+        }
+
+        $anchor = Carbon::parse($subscription->starts_at);
 
         $period = $this->calculateNextPeriod($subscription, $anchor);
-
-        if ($subscription->starts_at === null) {
-            $subscription->starts_at = $period['start'];
-        }
 
         $subscription->current_period_start = $period['start'];
         $subscription->current_period_end = $period['end'];

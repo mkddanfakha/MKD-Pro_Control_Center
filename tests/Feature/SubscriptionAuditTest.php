@@ -21,9 +21,7 @@ class SubscriptionAuditTest extends TestCase
 
         $payload = [
             'installation_id' => $installation->id,
-            'status' => Subscription::STATUS_ACTIVE,
-            'current_period_start' => '2026-10-01 00:00:00',
-            'current_period_end' => '2026-10-31 23:59:59',
+            'starts_at' => '2026-10-01 00:00:00',
             'notes' => 'Abonnement initial',
         ];
 
@@ -44,6 +42,7 @@ class SubscriptionAuditTest extends TestCase
         $this->assertSame(15000, $log->new_values['amount']);
         $this->assertSame('XOF', $log->new_values['currency']);
         $this->assertSame(Subscription::STATUS_ACTIVE, $log->new_values['status']);
+        $this->assertSame('2026-10-01 00:00:00', $log->new_values['starts_at']);
         $this->assertSame('2026-10-01 00:00:00', $log->new_values['current_period_start']);
         $this->assertSame('2026-10-31 23:59:59', $log->new_values['current_period_end']);
     }

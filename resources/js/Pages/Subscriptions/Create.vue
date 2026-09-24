@@ -13,11 +13,7 @@ const form = useForm({
     installation_id: '',
     amount: 15000,
     currency: 'XOF',
-    status: 'active',
     starts_at: '',
-    current_period_start: '',
-    current_period_end: '',
-    grace_period_ends_at: '',
     notes: '',
 });
 
@@ -115,8 +111,12 @@ const submit = () => {
 
                 <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">
                     <h2 class="text-lg font-semibold text-gray-900">
-                        Tarification et statut
+                        Tarification
                     </h2>
+
+                    <p class="mt-1 text-sm text-gray-500">
+                        Le nouvel abonnement est créé à l'état actif. Son cycle est calculé automatiquement.
+                    </p>
 
                     <div class="mt-6 grid gap-6 sm:grid-cols-2">
                         <div>
@@ -195,184 +195,53 @@ const submit = () => {
                                 {{ form.errors.currency }}
                             </p>
                         </div>
-
-                        <div class="sm:col-span-2 lg:col-span-1">
-                            <label
-                                for="status"
-                                class="block text-sm font-medium text-gray-700"
-                            >
-                                Statut
-                                <span class="text-red-600" aria-hidden="true">*</span>
-                            </label>
-
-                            <select
-                                id="status"
-                                v-model="form.status"
-                                :class="inputClass"
-                                :disabled="form.processing"
-                                :aria-invalid="!!form.errors.status"
-                                :aria-describedby="form.errors.status ? 'status-error' : undefined"
-                            >
-                                <option value="active">
-                                    Actif
-                                </option>
-                                <option value="grace_period">
-                                    Période de grâce
-                                </option>
-                                <option value="suspended">
-                                    Suspendu
-                                </option>
-                                <option value="terminated">
-                                    Terminé
-                                </option>
-                            </select>
-
-                            <p
-                                v-if="form.errors.status"
-                                id="status-error"
-                                class="mt-2 text-sm text-red-600"
-                            >
-                                {{ form.errors.status }}
-                            </p>
-                        </div>
                     </div>
                 </section>
 
                 <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">
                     <h2 class="text-lg font-semibold text-gray-900">
-                        Périodes et dates
+                        Début commercial
                     </h2>
 
                     <p class="mt-1 text-sm text-gray-500">
-                        Dates optionnelles du cycle d'abonnement.
+                        La période mensuelle est calculée automatiquement à partir du début commercial.
                     </p>
 
-                    <div class="mt-6 grid gap-6 sm:grid-cols-2">
-                        <div>
-                            <label
-                                for="starts_at"
-                                class="block text-sm font-medium text-gray-700"
-                            >
-                                Date de début
-                            </label>
+                    <div class="mt-6">
+                        <label
+                            for="starts_at"
+                            class="block text-sm font-medium text-gray-700"
+                        >
+                            Début commercial de l'abonnement
+                            <span class="text-red-600" aria-hidden="true">*</span>
+                        </label>
 
-                            <input
-                                id="starts_at"
-                                v-model="form.starts_at"
-                                name="starts_at"
-                                type="datetime-local"
-                                :class="inputClass"
-                                :disabled="form.processing"
-                                :aria-invalid="!!form.errors.starts_at"
-                                :aria-describedby="form.errors.starts_at ? 'starts_at-error' : undefined"
-                            />
+                        <input
+                            id="starts_at"
+                            v-model="form.starts_at"
+                            name="starts_at"
+                            type="datetime-local"
+                            required
+                            :class="inputClass"
+                            :disabled="form.processing"
+                            :aria-invalid="!!form.errors.starts_at"
+                            :aria-describedby="form.errors.starts_at ? 'starts_at-error' : 'starts_at-help'"
+                        />
 
-                            <p
-                                v-if="form.errors.starts_at"
-                                id="starts_at-error"
-                                class="mt-2 text-sm text-red-600"
-                            >
-                                {{ form.errors.starts_at }}
-                            </p>
-                        </div>
+                        <p
+                            id="starts_at-help"
+                            class="mt-2 text-xs text-gray-500"
+                        >
+                            Date et heure auxquelles le contrat commercial démarre.
+                        </p>
 
-                        <div>
-                            <label
-                                for="current_period_start"
-                                class="block text-sm font-medium text-gray-700"
-                            >
-                                Début de la période actuelle
-                            </label>
-
-                            <input
-                                id="current_period_start"
-                                v-model="form.current_period_start"
-                                name="current_period_start"
-                                type="datetime-local"
-                                :class="inputClass"
-                                :disabled="form.processing"
-                                :aria-invalid="!!form.errors.current_period_start"
-                                :aria-describedby="form.errors.current_period_start ? 'current_period_start-error' : undefined"
-                            />
-
-                            <p
-                                v-if="form.errors.current_period_start"
-                                id="current_period_start-error"
-                                class="mt-2 text-sm text-red-600"
-                            >
-                                {{ form.errors.current_period_start }}
-                            </p>
-                        </div>
-
-                        <div>
-                            <label
-                                for="current_period_end"
-                                class="block text-sm font-medium text-gray-700"
-                            >
-                                Fin de la période actuelle
-                            </label>
-
-                            <input
-                                id="current_period_end"
-                                v-model="form.current_period_end"
-                                name="current_period_end"
-                                type="datetime-local"
-                                :class="inputClass"
-                                :disabled="form.processing"
-                                :aria-invalid="!!form.errors.current_period_end"
-                                :aria-describedby="form.errors.current_period_end ? 'current_period_end-error' : 'current_period_end-help'"
-                            />
-
-                            <p
-                                id="current_period_end-help"
-                                class="mt-2 text-xs text-gray-500"
-                            >
-                                Date à laquelle la période mensuelle actuelle se termine.
-                            </p>
-
-                            <p
-                                v-if="form.errors.current_period_end"
-                                id="current_period_end-error"
-                                class="mt-2 text-sm text-red-600"
-                            >
-                                {{ form.errors.current_period_end }}
-                            </p>
-                        </div>
-
-                        <div>
-                            <label
-                                for="grace_period_ends_at"
-                                class="block text-sm font-medium text-gray-700"
-                            >
-                                Fin de la période de grâce
-                            </label>
-
-                            <input
-                                id="grace_period_ends_at"
-                                v-model="form.grace_period_ends_at"
-                                name="grace_period_ends_at"
-                                type="datetime-local"
-                                :class="inputClass"
-                                :disabled="form.processing"
-                                :aria-invalid="!!form.errors.grace_period_ends_at"
-                                :aria-describedby="form.errors.grace_period_ends_at ? 'grace_period_ends_at-error' : 'grace_period_ends_at-help'"
-                            />
-
-                            <p
-                                id="grace_period_ends_at-help"
-                                class="mt-2 text-xs text-gray-500"
-                            >
-                                À utiliser uniquement lorsqu'une période de grâce est prévue.
-                            </p>
-
-                            <p
-                                v-if="form.errors.grace_period_ends_at"
-                                id="grace_period_ends_at-error"
-                                class="mt-2 text-sm text-red-600"
-                            >
-                                {{ form.errors.grace_period_ends_at }}
-                            </p>
-                        </div>
+                        <p
+                            v-if="form.errors.starts_at"
+                            id="starts_at-error"
+                            class="mt-2 text-sm text-red-600"
+                        >
+                            {{ form.errors.starts_at }}
+                        </p>
                     </div>
                 </section>
 

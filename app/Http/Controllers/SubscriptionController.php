@@ -5,9 +5,11 @@ namespace App\Http\Controllers;
 use App\Models\Installation;
 use App\Models\Subscription;
 use App\Services\AuditLogService;
+use App\Services\SubscriptionService;
 use DateTimeInterface;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -15,6 +17,7 @@ class SubscriptionController extends Controller
 {
     public function __construct(
         private readonly AuditLogService $auditLogService,
+        private readonly SubscriptionService $subscriptionService,
     ) {}
 
     /**
@@ -57,15 +60,28 @@ class SubscriptionController extends Controller
             'currency' => $request->filled('currency') ? $request->input('currency') : 'XOF',
         ]);
 
-        $validated = $request->validate($this->validationRules());
+        $validated = $request->validate($this->storeValidationRules());
 
-        $subscription = Subscription::create($validated);
+        $subscription = DB::transaction(function () use ($validated) {
+            $subscription = Subscription::create([
+                'installation_id' => $validated['installation_id'],
+                'amount' => $validated['amount'],
+                'currency' => $validated['currency'],
+                'status' => Subscription::STATUS_ACTIVE,
+                'starts_at' => $validated['starts_at'],
+                'notes' => $validated['notes'] ?? null,
+            ]);
 
-        $this->auditLogService->record(
-            'subscription.created',
-            auditable: $subscription,
-            newValues: $this->subscriptionAuditSnapshot($subscription),
-        );
+            $subscription = $this->subscriptionService->createInitialPeriod($subscription);
+
+            $this->auditLogService->record(
+                'subscription.created',
+                auditable: $subscription,
+                newValues: $this->subscriptionAuditSnapshot($subscription),
+            );
+
+            return $subscription;
+        });
 
         return redirect()
             ->route('subscriptions.show', $subscription)
@@ -172,6 +188,20 @@ class SubscriptionController extends Controller
         }
 
         return $snapshot;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function storeValidationRules(): array
+    {
+        return [
+            'installation_id' => 'required|integer|exists:installations,id',
+            'amount' => 'required|integer|min:0',
+            'currency' => 'required|string|size:3',
+            'starts_at' => 'required|date',
+            'notes' => 'nullable|string',
+        ];
     }
 
     /**
