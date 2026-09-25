@@ -17,12 +17,15 @@ class DashboardController extends Controller
      */
     public function index(): Response
     {
+        $clientStats = $this->clientStatistics();
         $installationStats = $this->installationStatistics();
         $subscriptionStats = $this->subscriptionStatistics();
         $paymentStats = $this->paymentStatistics();
 
         return Inertia::render('Dashboard', [
             'totalClients' => Client::query()->count(),
+            'activeClients' => (int) $clientStats->active,
+            'inactiveClients' => (int) $clientStats->inactive_count,
             'totalInstallations' => (int) $installationStats->total,
             'activeInstallations' => (int) $installationStats->active,
             'suspendedInstallations' => (int) $installationStats->suspended,
@@ -52,6 +55,18 @@ class DashboardController extends Controller
                 ->count(),
             'recentActivities' => $this->recentActivities(),
         ]);
+    }
+
+    /**
+     * @return object{total: int|string, active: int|string, inactive_count: int|string}
+     */
+    private function clientStatistics(): object
+    {
+        return Client::query()
+            ->selectRaw('COUNT(*) as total')
+            ->selectRaw("SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active")
+            ->selectRaw("SUM(CASE WHEN status = 'inactive' THEN 1 ELSE 0 END) as inactive_count")
+            ->first();
     }
 
     /**

@@ -12,7 +12,9 @@ use App\Services\SubscriptionService;
 use DateTimeInterface;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
+use Illuminate\Validation\Rule;
 use Inertia\Inertia;
+use Inertia\Response;
 
 class ClientController extends Controller
 {
@@ -25,14 +27,31 @@ class ClientController extends Controller
     /**
      * Display a listing of the resource.
      */
-    public function index()
+    public function index(Request $request): Response
     {
-        $clients = Client::query()
+        $validated = $request->validate([
+            'status' => [
+                'nullable',
+                Rule::in(['active', 'inactive']),
+            ],
+        ]);
+
+        $query = Client::query();
+
+        if (filled($validated['status'] ?? null)) {
+            $query->where('status', $validated['status']);
+        }
+
+        $clients = $query
             ->orderByDesc('id')
-            ->paginate(15);
+            ->paginate(15)
+            ->withQueryString();
 
         return Inertia::render('Clients/Index', [
             'clients' => $clients,
+            'filters' => [
+                'status' => $validated['status'] ?? null,
+            ],
         ]);
     }
 

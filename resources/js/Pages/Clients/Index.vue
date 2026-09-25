@@ -1,14 +1,62 @@
 <script setup>
 import AdminLayout from '@/Layouts/AdminLayout.vue';
 import { Head, Link, router, usePage } from '@inertiajs/vue3';
-import { ref } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 
-defineProps({
+const props = defineProps({
     clients: {
         type: Object,
         required: true,
     },
+    filters: {
+        type: Object,
+        default: () => ({
+            status: null,
+        }),
+    },
 });
+
+const filterForm = reactive({
+    status: props.filters.status ?? '',
+});
+
+watch(
+    () => props.filters,
+    (filters) => {
+        filterForm.status = filters.status ?? '';
+    },
+    { deep: true },
+);
+
+const hasActiveFilters = computed(
+    () => filterForm.status !== '' && filterForm.status != null,
+);
+
+function buildFilterParams() {
+    const params = {};
+
+    if (filterForm.status !== '') {
+        params.status = filterForm.status;
+    }
+
+    return params;
+}
+
+function applyFilters() {
+    router.get('/clients', buildFilterParams(), {
+        preserveState: true,
+        preserveScroll: true,
+    });
+}
+
+function resetFilters() {
+    filterForm.status = '';
+
+    router.get('/clients', {}, {
+        preserveState: true,
+        preserveScroll: true,
+    });
+}
 
 const page = usePage();
 
@@ -165,6 +213,53 @@ function confirmDelete() {
                     Nouveau client
                 </Link>
             </div>
+
+            <form
+                class="mt-8 rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-200 sm:p-6"
+                @submit.prevent="applyFilters"
+            >
+                <div>
+                    <label
+                        for="filter-client-status"
+                        class="block text-sm font-medium text-gray-700"
+                    >
+                        Statut
+                    </label>
+                    <select
+                        id="filter-client-status"
+                        v-model="filterForm.status"
+                        class="mt-2 block w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-900 shadow-sm outline-none transition focus:border-gray-900 focus:ring-2 focus:ring-gray-200 sm:max-w-md"
+                    >
+                        <option value="">
+                            Tous les statuts
+                        </option>
+                        <option value="active">
+                            Actif
+                        </option>
+                        <option value="inactive">
+                            Inactif
+                        </option>
+                    </select>
+                </div>
+
+                <div class="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                    <button
+                        v-if="hasActiveFilters"
+                        type="button"
+                        class="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2"
+                        @click="resetFilters"
+                    >
+                        Réinitialiser
+                    </button>
+
+                    <button
+                        type="submit"
+                        class="inline-flex items-center justify-center rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-gray-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2"
+                    >
+                        Filtrer
+                    </button>
+                </div>
+            </form>
 
             <div
                 v-if="!clients.data.length"

@@ -7,6 +7,14 @@ defineProps({
         type: Number,
         default: 0,
     },
+    activeClients: {
+        type: Number,
+        default: 0,
+    },
+    inactiveClients: {
+        type: Number,
+        default: 0,
+    },
     totalInstallations: {
         type: Number,
         default: 0,
@@ -215,8 +223,41 @@ function activityBadgeClass(type) {
                 </div>
             </section>
 
+            <!-- B. État des clients -->
+            <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">
+                <h2 class="text-lg font-semibold text-gray-900">
+                    État des clients
+                </h2>
+
+                <dl class="mt-6 grid gap-4 sm:grid-cols-2">
+                    <Link
+                        href="/clients?status=active"
+                        class="block rounded-lg bg-gray-50 px-4 py-3 ring-1 ring-gray-100 transition hover:bg-gray-100 hover:ring-gray-200"
+                    >
+                        <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                            Actifs
+                        </dt>
+                        <dd class="mt-1 text-2xl font-bold text-sky-800">
+                            {{ formatCount(activeClients) }}
+                        </dd>
+                    </Link>
+
+                    <Link
+                        href="/clients?status=inactive"
+                        class="block rounded-lg bg-gray-50 px-4 py-3 ring-1 ring-gray-100 transition hover:bg-gray-100 hover:ring-gray-200"
+                    >
+                        <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                            Inactifs
+                        </dt>
+                        <dd class="mt-1 text-2xl font-bold text-gray-700">
+                            {{ formatCount(inactiveClients) }}
+                        </dd>
+                    </Link>
+                </dl>
+            </section>
+
             <div class="grid gap-8 xl:grid-cols-2">
-                <!-- B. État des installations -->
+                <!-- C. État des installations -->
                 <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">
                     <h2 class="text-lg font-semibold text-gray-900">
                         État des installations
@@ -261,7 +302,7 @@ function activityBadgeClass(type) {
                     </dl>
                 </section>
 
-                <!-- C. État des abonnements -->
+                <!-- D. État des abonnements -->
                 <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">
                     <h2 class="text-lg font-semibold text-gray-900">
                         État des abonnements

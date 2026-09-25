@@ -109,6 +109,23 @@ class DashboardAlertDeepLinksTest extends TestCase
         $this->assertStringNotContainsString('href="/installations?status=inactive"', $contents);
     }
 
+    public function test_dashboard_vue_client_status_cards_use_status_filter_deep_links(): void
+    {
+        $contents = file_get_contents(base_path('resources/js/Pages/Dashboard.vue'));
+
+        $this->assertStringContainsString('href="/clients?status=active"', $contents);
+        $this->assertStringContainsString('href="/clients?status=inactive"', $contents);
+        $this->assertStringNotContainsString('href="/clients?status=foo"', $contents);
+    }
+
+    public function test_dashboard_vue_general_clients_link_remains_present(): void
+    {
+        $contents = file_get_contents(base_path('resources/js/Pages/Dashboard.vue'));
+
+        $this->assertStringContainsString('Voir les clients', $contents);
+        $this->assertMatchesRegularExpression('/href="\/clients"\s*\n/', $contents);
+    }
+
     /**
      * @param  array<string, mixed>  $attributes
      */
