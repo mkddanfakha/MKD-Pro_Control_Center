@@ -244,6 +244,9 @@ class PaymentController extends Controller
             'reference',
             'notes',
             'renewal_applied_at',
+            'monthly_unit_amount',
+            'credit_months_purchased',
+            'credit_exhausted_at',
         ] as $attribute) {
             $value = $payment->getAttribute($attribute);
 

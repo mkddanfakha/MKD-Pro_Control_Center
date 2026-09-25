@@ -44,6 +44,34 @@ class PaymentAuditTest extends TestCase
         $this->assertSame(15000, $log->new_values['amount']);
         $this->assertSame(Payment::STATUS_PENDING, $log->new_values['status']);
         $this->assertSame($subscription->id, $log->new_values['subscription_id']);
+        $this->assertSame(15000, $log->new_values['monthly_unit_amount']);
+        $this->assertSame(1, $log->new_values['credit_months_purchased']);
+        $this->assertNull($log->new_values['credit_exhausted_at']);
+    }
+
+    public function test_payment_creation_audit_includes_multi_month_credit_fields(): void
+    {
+        $user = User::factory()->create();
+        $subscription = $this->makeSubscription();
+
+        $response = $this->actingAs($user)->post(route('payments.store'), [
+            'subscription_id' => $subscription->id,
+            'amount' => 90000,
+            'currency' => 'XOF',
+            'status' => Payment::STATUS_PAID,
+            'paid_at' => '2026-10-15 12:00:00',
+            'reference' => 'PAY-90000',
+        ]);
+
+        $response->assertRedirect();
+
+        $log = AuditLog::query()->where('action', 'payment.created')->sole();
+
+        $this->assertSame(90000, $log->new_values['amount']);
+        $this->assertSame('XOF', $log->new_values['currency']);
+        $this->assertSame(15000, $log->new_values['monthly_unit_amount']);
+        $this->assertSame(6, $log->new_values['credit_months_purchased']);
+        $this->assertNull($log->new_values['credit_exhausted_at']);
     }
 
     public function test_payment_update_is_audited(): void
@@ -87,6 +115,12 @@ class PaymentAuditTest extends TestCase
         $this->assertSame(Payment::STATUS_PAID, $log->new_values['status']);
         $this->assertSame('REF-OLD', $log->old_values['reference']);
         $this->assertSame('REF-NEW', $log->new_values['reference']);
+        $this->assertSame(15000, $log->old_values['monthly_unit_amount']);
+        $this->assertSame(1, $log->old_values['credit_months_purchased']);
+        $this->assertNull($log->old_values['credit_exhausted_at']);
+        $this->assertSame(15000, $log->new_values['monthly_unit_amount']);
+        $this->assertSame(1, $log->new_values['credit_months_purchased']);
+        $this->assertNull($log->new_values['credit_exhausted_at']);
     }
 
     public function test_payment_deletion_is_audited_without_polymorphic_reference(): void
@@ -160,6 +194,12 @@ class PaymentAuditTest extends TestCase
         $this->assertSame($payment->id, $log->auditable_id);
         $this->assertNull($log->old_values['payment']['renewal_applied_at']);
         $this->assertNull($log->new_values['payment']['renewal_applied_at']);
+        $this->assertSame(15000, $log->old_values['payment']['monthly_unit_amount']);
+        $this->assertSame(1, $log->old_values['payment']['credit_months_purchased']);
+        $this->assertNull($log->old_values['payment']['credit_exhausted_at']);
+        $this->assertSame(15000, $log->new_values['payment']['monthly_unit_amount']);
+        $this->assertSame(1, $log->new_values['payment']['credit_months_purchased']);
+        $this->assertNotNull($log->new_values['payment']['credit_exhausted_at']);
         $this->assertSame('2026-10-31 23:59:59', $log->old_values['subscription']['current_period_end']);
         $this->assertSame('2026-11-30 23:59:59', $log->new_values['subscription']['current_period_end']);
     }
