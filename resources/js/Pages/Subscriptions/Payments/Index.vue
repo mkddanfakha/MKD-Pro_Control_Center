@@ -1,14 +1,72 @@
 <script setup>
 import AdminLayout from '@/Layouts/AdminLayout.vue';
 import { Head, Link, router, usePage } from '@inertiajs/vue3';
-import { ref } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 
-defineProps({
+const props = defineProps({
     payments: {
         type: Object,
         required: true,
     },
+    filters: {
+        type: Object,
+        default: () => ({
+            status: null,
+            overdue: null,
+        }),
+    },
 });
+
+const filterForm = reactive({
+    status: props.filters.status ?? '',
+    overdue: props.filters.overdue != null ? String(props.filters.overdue) : '',
+});
+
+watch(
+    () => props.filters,
+    (filters) => {
+        filterForm.status = filters.status ?? '';
+        filterForm.overdue = filters.overdue != null ? String(filters.overdue) : '';
+    },
+    { deep: true },
+);
+
+const hasActiveFilters = computed(
+    () =>
+        (filterForm.status !== '' && filterForm.status != null)
+        || (filterForm.overdue !== '' && filterForm.overdue != null),
+);
+
+function buildFilterParams() {
+    const params = {};
+
+    if (filterForm.status !== '') {
+        params.status = filterForm.status;
+    }
+
+    if (filterForm.overdue === '1') {
+        params.overdue = 1;
+    }
+
+    return params;
+}
+
+function applyFilters() {
+    router.get('/payments', buildFilterParams(), {
+        preserveState: true,
+        preserveScroll: true,
+    });
+}
+
+function resetFilters() {
+    filterForm.status = '';
+    filterForm.overdue = '';
+
+    router.get('/payments', {}, {
+        preserveState: true,
+        preserveScroll: true,
+    });
+}
 
 const page = usePage();
 
@@ -249,6 +307,82 @@ function confirmDelete() {
                     Nouveau paiement
                 </Link>
             </div>
+
+            <form
+                class="mt-8 rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-200 sm:p-6"
+                @submit.prevent="applyFilters"
+            >
+                <div class="grid gap-4 sm:grid-cols-2">
+                    <div>
+                        <label
+                            for="filter-payment-status"
+                            class="block text-sm font-medium text-gray-700"
+                        >
+                            Statut
+                        </label>
+                        <select
+                            id="filter-payment-status"
+                            v-model="filterForm.status"
+                            class="mt-2 block w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-900 shadow-sm outline-none transition focus:border-gray-900 focus:ring-2 focus:ring-gray-200"
+                        >
+                            <option value="">
+                                Tous les statuts
+                            </option>
+                            <option value="pending">
+                                En attente
+                            </option>
+                            <option value="paid">
+                                Payé
+                            </option>
+                            <option value="failed">
+                                Échoué
+                            </option>
+                            <option value="refunded">
+                                Remboursé
+                            </option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label
+                            for="filter-payment-overdue"
+                            class="block text-sm font-medium text-gray-700"
+                        >
+                            Paiements en retard
+                        </label>
+                        <select
+                            id="filter-payment-overdue"
+                            v-model="filterForm.overdue"
+                            class="mt-2 block w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-900 shadow-sm outline-none transition focus:border-gray-900 focus:ring-2 focus:ring-gray-200"
+                        >
+                            <option value="">
+                                Tous les paiements
+                            </option>
+                            <option value="1">
+                                Paiements en retard
+                            </option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                    <button
+                        v-if="hasActiveFilters"
+                        type="button"
+                        class="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2"
+                        @click="resetFilters"
+                    >
+                        Réinitialiser
+                    </button>
+
+                    <button
+                        type="submit"
+                        class="inline-flex items-center justify-center rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-gray-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2"
+                    >
+                        Filtrer
+                    </button>
+                </div>
+            </form>
 
             <div
                 v-if="!payments.data.length"

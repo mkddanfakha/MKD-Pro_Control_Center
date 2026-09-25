@@ -1,14 +1,78 @@
 <script setup>
 import AdminLayout from '@/Layouts/AdminLayout.vue';
 import { Head, Link, router, usePage } from '@inertiajs/vue3';
-import { ref } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 
-defineProps({
+const props = defineProps({
     subscriptions: {
         type: Object,
         required: true,
     },
+    filters: {
+        type: Object,
+        default: () => ({
+            status: null,
+            expiring_within_days: null,
+        }),
+    },
 });
+
+const filterForm = reactive({
+    status: props.filters.status ?? '',
+    expiring_within_days:
+        props.filters.expiring_within_days != null
+            ? String(props.filters.expiring_within_days)
+            : '',
+});
+
+watch(
+    () => props.filters,
+    (filters) => {
+        filterForm.status = filters.status ?? '';
+        filterForm.expiring_within_days =
+            filters.expiring_within_days != null
+                ? String(filters.expiring_within_days)
+                : '';
+    },
+    { deep: true },
+);
+
+const hasActiveFilters = computed(
+    () =>
+        (filterForm.status !== '' && filterForm.status != null)
+        || (filterForm.expiring_within_days !== '' && filterForm.expiring_within_days != null),
+);
+
+function buildFilterParams() {
+    const params = {};
+
+    if (filterForm.status !== '') {
+        params.status = filterForm.status;
+    }
+
+    if (filterForm.expiring_within_days === '7') {
+        params.expiring_within_days = 7;
+    }
+
+    return params;
+}
+
+function applyFilters() {
+    router.get('/subscriptions', buildFilterParams(), {
+        preserveState: true,
+        preserveScroll: true,
+    });
+}
+
+function resetFilters() {
+    filterForm.status = '';
+    filterForm.expiring_within_days = '';
+
+    router.get('/subscriptions', {}, {
+        preserveState: true,
+        preserveScroll: true,
+    });
+}
 
 const page = usePage();
 
@@ -211,6 +275,82 @@ function confirmDelete() {
                     Nouvel abonnement
                 </Link>
             </div>
+
+            <form
+                class="mt-8 rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-200 sm:p-6"
+                @submit.prevent="applyFilters"
+            >
+                <div class="grid gap-4 sm:grid-cols-2">
+                    <div>
+                        <label
+                            for="filter-subscription-status"
+                            class="block text-sm font-medium text-gray-700"
+                        >
+                            Statut
+                        </label>
+                        <select
+                            id="filter-subscription-status"
+                            v-model="filterForm.status"
+                            class="mt-2 block w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-900 shadow-sm outline-none transition focus:border-gray-900 focus:ring-2 focus:ring-gray-200"
+                        >
+                            <option value="">
+                                Tous les statuts
+                            </option>
+                            <option value="active">
+                                Actif
+                            </option>
+                            <option value="grace_period">
+                                Période de grâce
+                            </option>
+                            <option value="suspended">
+                                Suspendu
+                            </option>
+                            <option value="terminated">
+                                Terminé
+                            </option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label
+                            for="filter-subscription-expiring"
+                            class="block text-sm font-medium text-gray-700"
+                        >
+                            Échéance
+                        </label>
+                        <select
+                            id="filter-subscription-expiring"
+                            v-model="filterForm.expiring_within_days"
+                            class="mt-2 block w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-900 shadow-sm outline-none transition focus:border-gray-900 focus:ring-2 focus:ring-gray-200"
+                        >
+                            <option value="">
+                                Toutes les échéances
+                            </option>
+                            <option value="7">
+                                Échéance dans les 7 jours
+                            </option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                    <button
+                        v-if="hasActiveFilters"
+                        type="button"
+                        class="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2"
+                        @click="resetFilters"
+                    >
+                        Réinitialiser
+                    </button>
+
+                    <button
+                        type="submit"
+                        class="inline-flex items-center justify-center rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-gray-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2"
+                    >
+                        Filtrer
+                    </button>
+                </div>
+            </form>
 
             <div
                 v-if="!subscriptions.data.length"

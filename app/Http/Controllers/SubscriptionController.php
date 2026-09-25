@@ -12,6 +12,7 @@ use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -35,15 +36,48 @@ class SubscriptionController extends Controller
     /**
      * Display a listing of the resource.
      */
-    public function index(): Response
+    public function index(Request $request): Response
     {
-        $subscriptions = Subscription::query()
-            ->with('installation.client')
+        $validated = $request->validate([
+            'status' => [
+                'nullable',
+                Rule::in([
+                    Subscription::STATUS_ACTIVE,
+                    Subscription::STATUS_GRACE_PERIOD,
+                    Subscription::STATUS_SUSPENDED,
+                    Subscription::STATUS_TERMINATED,
+                ]),
+            ],
+            'expiring_within_days' => ['nullable', Rule::in([7])],
+        ]);
+
+        $query = Subscription::query()
+            ->with('installation.client');
+
+        if (filled($validated['status'] ?? null)) {
+            $query->where('status', $validated['status']);
+        }
+
+        if (filled($validated['expiring_within_days'] ?? null)) {
+            $query
+                ->where('status', Subscription::STATUS_ACTIVE)
+                ->whereNotNull('current_period_end')
+                ->whereBetween('current_period_end', [now(), now()->addDays(7)]);
+        }
+
+        $subscriptions = $query
             ->orderByDesc('id')
-            ->paginate(15);
+            ->paginate(15)
+            ->withQueryString();
 
         return Inertia::render('Subscriptions/Index', [
             'subscriptions' => $subscriptions,
+            'filters' => [
+                'status' => $validated['status'] ?? null,
+                'expiring_within_days' => isset($validated['expiring_within_days'])
+                    ? (int) $validated['expiring_within_days']
+                    : null,
+            ],
         ]);
     }
 

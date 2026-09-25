@@ -390,7 +390,7 @@ function activityBadgeClass(type) {
                         </p>
                         <Link
                             v-if="subscriptionsExpiringSoon > 0"
-                            href="/subscriptions"
+                            href="/subscriptions?expiring_within_days=7"
                             class="mt-3 inline-block text-sm font-medium text-amber-900 underline-offset-2 hover:underline"
                         >
                             Consulter les abonnements
@@ -419,7 +419,7 @@ function activityBadgeClass(type) {
                         </p>
                         <Link
                             v-if="overduePayments > 0"
-                            href="/payments"
+                            href="/payments?overdue=1"
                             class="mt-3 inline-block text-sm font-medium text-red-800 underline-offset-2 hover:underline"
                         >
                             Consulter les paiements

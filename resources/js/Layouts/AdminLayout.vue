@@ -50,10 +50,6 @@ const navigation = [
         href: '/audit-logs',
         activePath: '/audit-logs',
     },
-    {
-        label: 'Sauvegardes',
-        href: '/backups',
-    },
 ];
 
 

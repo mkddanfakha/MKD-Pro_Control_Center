@@ -26,17 +26,48 @@ class PaymentController extends Controller
     /**
      * Display a listing of the resource.
      */
-    public function index(): Response
+    public function index(Request $request): Response
     {
-        $payments = Payment::query()
+        $validated = $request->validate([
+            'status' => [
+                'nullable',
+                Rule::in([
+                    Payment::STATUS_PENDING,
+                    Payment::STATUS_PAID,
+                    Payment::STATUS_FAILED,
+                    Payment::STATUS_REFUNDED,
+                ]),
+            ],
+            'overdue' => ['nullable', Rule::in([1])],
+        ]);
+
+        $query = Payment::query()
             ->with([
                 'subscription.installation.client',
-            ])
+            ]);
+
+        if (filled($validated['status'] ?? null)) {
+            $query->where('status', $validated['status']);
+        }
+
+        if (filled($validated['overdue'] ?? null) && (int) $validated['overdue'] === 1) {
+            $query
+                ->whereIn('status', [Payment::STATUS_PENDING, Payment::STATUS_FAILED])
+                ->whereNotNull('due_at')
+                ->where('due_at', '<', now());
+        }
+
+        $payments = $query
             ->orderByDesc('id')
-            ->paginate(15);
+            ->paginate(15)
+            ->withQueryString();
 
         return Inertia::render('Subscriptions/Payments/Index', [
             'payments' => $payments,
+            'filters' => [
+                'status' => $validated['status'] ?? null,
+                'overdue' => isset($validated['overdue']) ? (int) $validated['overdue'] : null,
+            ],
         ]);
     }
 
