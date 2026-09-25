@@ -30,6 +30,9 @@ Route::middleware('auth')->group(function () {
 
     Route::resource('installations', InstallationController::class);
 
+    Route::post('subscriptions/{subscription}/consume-credit', [SubscriptionController::class, 'consumeCredit'])
+        ->name('subscriptions.consume-credit');
+
     Route::resource('subscriptions', SubscriptionController::class);
 
     Route::post('payments/{payment}/renew-subscription', [PaymentController::class, 'renewSubscription'])

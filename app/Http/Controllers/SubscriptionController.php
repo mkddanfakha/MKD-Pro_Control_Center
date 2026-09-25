@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Exceptions\Subscription\SubscriptionServiceException;
 use App\Models\Installation;
 use App\Models\Subscription;
 use App\Services\AuditLogService;
@@ -116,7 +117,54 @@ class SubscriptionController extends Controller
 
         return Inertia::render('Subscriptions/Show', [
             'subscription' => $subscription,
+            'credit' => $this->subscriptionService->summarizeSubscriptionCreditForDisplay($subscription),
         ]);
+    }
+
+    /**
+     * Consomme le prochain mois de crédit disponible pour l'abonnement (FIFO).
+     */
+    public function consumeCredit(Subscription $subscription): RedirectResponse
+    {
+        $subscriptionBefore = $this->subscriptionAuditSnapshot($subscription);
+
+        try {
+            $consumption = $this->subscriptionService->consumeNextCreditForSubscription($subscription);
+        } catch (SubscriptionServiceException $exception) {
+            $this->auditLogService->record(
+                'subscription.credit_consumption_failed',
+                auditable: $subscription,
+                result: 'failure',
+                errorMessage: 'La consommation de crédit a échoué.',
+            );
+
+            return redirect()
+                ->route('subscriptions.show', $subscription)
+                ->with('error', $exception->getMessage());
+        }
+
+        $subscriptionAfter = $subscription->fresh();
+
+        $this->auditLogService->record(
+            'subscription.credit_consumed',
+            auditable: $subscriptionAfter,
+            oldValues: [
+                'subscription' => $subscriptionBefore,
+            ],
+            newValues: [
+                'subscription' => $this->subscriptionAuditSnapshot($subscriptionAfter),
+                'consumption' => [
+                    'id' => $consumption->id,
+                    'payment_id' => $consumption->payment_id,
+                    'period_start' => $consumption->period_start->format('Y-m-d H:i:s'),
+                    'period_end' => $consumption->period_end->format('Y-m-d H:i:s'),
+                ],
+            ],
+        );
+
+        return redirect()
+            ->route('subscriptions.show', $subscription)
+            ->with('success', 'Un mois de crédit a été consommé et l’abonnement a été renouvelé.');
     }
 
     /**

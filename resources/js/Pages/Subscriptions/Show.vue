@@ -1,16 +1,23 @@
 <script setup>
 import AdminLayout from '@/Layouts/AdminLayout.vue';
-import { Head, Link, usePage } from '@inertiajs/vue3';
-import { computed } from 'vue';
+import { Head, Link, router, usePage } from '@inertiajs/vue3';
+import { computed, ref } from 'vue';
 
 const props = defineProps({
     subscription: {
         type: Object,
         required: true,
     },
+    credit: {
+        type: Object,
+        required: true,
+    },
 });
 
 const page = usePage();
+
+const showConsumeConfirm = ref(false);
+const consuming = ref(false);
 
 const installationSubtitle = computed(() => {
     const installation = props.subscription.installation;
@@ -55,6 +62,24 @@ function formatDateTime(value) {
     return `${datePart} ${timePart}`;
 }
 
+function formatDate(value) {
+    if (!value || String(value).trim() === '') {
+        return '—';
+    }
+
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) {
+        return '—';
+    }
+
+    return new Intl.DateTimeFormat('fr-FR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+    }).format(date);
+}
+
 function formatAmount(amount, currency) {
     if (amount === null || amount === undefined || amount === '') {
         return '—';
@@ -65,6 +90,68 @@ function formatAmount(amount, currency) {
     }).format(Number(amount));
 
     return `${formatted} ${currency ?? 'XOF'}`;
+}
+
+function formatMonthsCount(count) {
+    if (count === null || count === undefined || count === '') {
+        return '—';
+    }
+
+    const value = Number(count);
+
+    if (Number.isNaN(value)) {
+        return '—';
+    }
+
+    if (value <= 1) {
+        return `${value} mois`;
+    }
+
+    return `${value} mois`;
+}
+
+function remainingMonthsLabel(remaining) {
+    if (remaining === null || remaining === undefined || remaining === '') {
+        return '—';
+    }
+
+    const value = Number(remaining);
+
+    if (Number.isNaN(value)) {
+        return '—';
+    }
+
+    if (value === 0) {
+        return '0 mois restant';
+    }
+
+    if (value === 1) {
+        return '1 mois restant';
+    }
+
+    return `${value} mois restants`;
+}
+
+function consumedMonthsLabel(count) {
+    if (count === null || count === undefined || count === '') {
+        return '—';
+    }
+
+    const value = Number(count);
+
+    if (Number.isNaN(value)) {
+        return '—';
+    }
+
+    if (value === 0) {
+        return 'Aucun mois consommé';
+    }
+
+    if (value === 1) {
+        return '1 mois consommé';
+    }
+
+    return `${value} mois consommés`;
 }
 
 function subscriptionStatusLabel(status) {
@@ -116,6 +203,26 @@ const hasNotes = computed(() => {
 
     return notes && String(notes).trim() !== '';
 });
+
+function consumeCreditUrl() {
+    return `/subscriptions/${props.subscription.id}/consume-credit`;
+}
+
+function confirmConsumeNextCredit() {
+    if (consuming.value) {
+        return;
+    }
+
+    consuming.value = true;
+
+    router.post(consumeCreditUrl(), {}, {
+        preserveScroll: true,
+        onFinish: () => {
+            consuming.value = false;
+            showConsumeConfirm.value = false;
+        },
+    });
+}
 </script>
 
 <template>
@@ -129,6 +236,61 @@ const hasNotes = computed(() => {
                 role="status"
             >
                 {{ page.flash.success }}
+            </div>
+
+            <div
+                v-if="page.flash.error"
+                class="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-800"
+                role="alert"
+            >
+                {{ page.flash.error }}
+            </div>
+
+            <div
+                v-if="showConsumeConfirm"
+                class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="consume-credit-title"
+                @click.self="showConsumeConfirm = false"
+            >
+                <div class="w-full max-w-lg rounded-xl bg-white p-6 shadow-lg ring-1 ring-gray-200">
+                    <h2
+                        id="consume-credit-title"
+                        class="text-lg font-semibold text-gray-900"
+                    >
+                        Consommer le prochain crédit
+                    </h2>
+
+                    <p class="mt-3 text-sm text-gray-600">
+                        Consommer 1 mois de crédit pour cet abonnement ?
+                    </p>
+
+                    <p class="mt-2 text-sm text-gray-500">
+                        Le prochain mois disponible sera débité selon l'ordre FIFO des paiements. L'abonnement sera avancé d'une période.
+                    </p>
+
+                    <div class="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                        <button
+                            type="button"
+                            class="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+                            :disabled="consuming"
+                            @click="showConsumeConfirm = false"
+                        >
+                            Annuler
+                        </button>
+
+                        <button
+                            type="button"
+                            class="inline-flex items-center justify-center rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-gray-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+                            :disabled="consuming"
+                            :aria-busy="consuming"
+                            @click="confirmConsumeNextCredit"
+                        >
+                            {{ consuming ? 'Consommation…' : 'Confirmer la consommation' }}
+                        </button>
+                    </div>
+                </div>
             </div>
 
             <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -242,6 +404,149 @@ const hasNotes = computed(() => {
                             </dd>
                         </div>
                     </dl>
+                </section>
+
+                <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">
+                    <h2 class="text-lg font-semibold text-gray-900">
+                        Crédit disponible
+                    </h2>
+
+                    <div class="mt-6 space-y-6">
+                        <div>
+                            <p
+                                v-if="credit.available_months === 0"
+                                class="text-sm font-medium text-gray-900"
+                            >
+                                Aucun crédit disponible
+                            </p>
+                            <p
+                                v-else
+                                class="text-2xl font-semibold tabular-nums text-gray-900"
+                            >
+                                {{ formatMonthsCount(credit.available_months) }}
+                            </p>
+
+                            <p class="mt-2 text-sm text-gray-500">
+                                Paiements :
+                                <span class="font-medium text-gray-900">{{ credit.payment_count }}</span>
+                            </p>
+
+                            <div
+                                v-if="credit.available_months > 0"
+                                class="mt-4"
+                            >
+                                <button
+                                    type="button"
+                                    class="inline-flex items-center justify-center rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-gray-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+                                    :disabled="consuming"
+                                    :aria-busy="consuming"
+                                    @click="showConsumeConfirm = true"
+                                >
+                                    Consommer le prochain crédit
+                                </button>
+                            </div>
+                        </div>
+
+                        <div
+                            v-if="credit.payments?.length"
+                            class="space-y-4"
+                        >
+                            <h3 class="text-sm font-medium text-gray-500">
+                                Historique des paiements et crédit
+                            </h3>
+
+                            <ul class="space-y-4">
+                                <li
+                                    v-for="payment in credit.payments"
+                                    :key="payment.id"
+                                    class="rounded-lg border border-gray-200 bg-gray-50/80 p-4 sm:p-5"
+                                >
+                                    <div class="flex flex-wrap items-center gap-2">
+                                        <p class="text-sm font-semibold text-gray-900">
+                                            Paiement #{{ payment.id }}
+                                        </p>
+                                        <span
+                                            v-if="payment.is_refunded"
+                                            class="inline-flex rounded-full bg-gray-200 px-2.5 py-0.5 text-xs font-medium text-gray-800 ring-1 ring-inset ring-gray-300"
+                                        >
+                                            Remboursé
+                                        </span>
+                                    </div>
+
+                                    <dl class="mt-4 grid gap-3 sm:grid-cols-2">
+                                        <div class="sm:col-span-2">
+                                            <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                                Montant
+                                            </dt>
+                                            <dd class="mt-0.5 text-sm font-medium text-gray-900">
+                                                {{ formatAmount(payment.amount, payment.currency) }}
+                                            </dd>
+                                        </div>
+
+                                        <div>
+                                            <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                                Mois achetés
+                                            </dt>
+                                            <dd class="mt-0.5 text-sm text-gray-900">
+                                                {{ formatMonthsCount(payment.credit_months_purchased) }}
+                                            </dd>
+                                        </div>
+
+                                        <div>
+                                            <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                                Mois restants
+                                            </dt>
+                                            <dd
+                                                class="mt-0.5 text-sm text-gray-900"
+                                                :class="payment.is_refunded ? 'text-gray-500' : ''"
+                                            >
+                                                <template v-if="payment.is_refunded">
+                                                    —
+                                                </template>
+                                                <template v-else>
+                                                    {{ remainingMonthsLabel(payment.credit_months_remaining) }}
+                                                </template>
+                                            </dd>
+                                        </div>
+
+                                        <div>
+                                            <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                                Mensualité de référence
+                                            </dt>
+                                            <dd class="mt-0.5 text-sm text-gray-900">
+                                                {{ formatAmount(payment.monthly_unit_amount, payment.currency) }}
+                                            </dd>
+                                        </div>
+
+                                        <div>
+                                            <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                                Payé le
+                                            </dt>
+                                            <dd class="mt-0.5 text-sm text-gray-900">
+                                                {{ formatDate(payment.paid_at) }}
+                                            </dd>
+                                        </div>
+
+                                        <div class="sm:col-span-2">
+                                            <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                                Consommation
+                                            </dt>
+                                            <dd class="mt-0.5 text-sm text-gray-900">
+                                                {{ consumedMonthsLabel(payment.consumptions_count) }}
+                                            </dd>
+                                        </div>
+                                    </dl>
+                                </li>
+                            </ul>
+                        </div>
+
+                        <p
+                            v-else
+                            class="text-sm text-gray-500"
+                        >
+                            Aucun paiement enregistré pour cet abonnement.
+                        </p>
+                    </div>
                 </section>
 
                 <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">

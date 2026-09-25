@@ -207,6 +207,69 @@ class SubscriptionService
     }
 
     /**
+     * Résumé lecture seule du crédit d'un abonnement (affichage Inertia, sans consommation).
+     *
+     * @return array{
+     *     available_months: int,
+     *     payment_count: int,
+     *     payments: list<array{
+     *         id: int,
+     *         amount: int,
+     *         currency: string,
+     *         paid_at: string|null,
+     *         monthly_unit_amount: int|null,
+     *         credit_months_purchased: int|null,
+     *         credit_months_remaining: int,
+     *         consumptions_count: int,
+     *         credit_exhausted_at: string|null,
+     *         status: string,
+     *         is_refunded: bool
+     *     }>
+     * }
+     */
+    public function summarizeSubscriptionCreditForDisplay(Subscription $subscription): array
+    {
+        $payments = Payment::query()
+            ->where('subscription_id', $subscription->id)
+            ->withCount('consumptions')
+            ->orderBy('paid_at')
+            ->orderBy('id')
+            ->get();
+
+        $paymentRows = [];
+        $availableMonths = 0;
+
+        foreach ($payments as $payment) {
+            $remaining = $this->remainingCreditMonthsForPayment($payment);
+            $consumptionsCount = (int) $payment->consumptions_count;
+
+            if ($this->paymentContributesToConsumableCredit($subscription, $payment, $remaining)) {
+                $availableMonths += $remaining;
+            }
+
+            $paymentRows[] = [
+                'id' => $payment->id,
+                'amount' => (int) $payment->amount,
+                'currency' => (string) $payment->currency,
+                'paid_at' => $payment->paid_at?->format('Y-m-d H:i:s'),
+                'monthly_unit_amount' => $payment->monthly_unit_amount !== null ? (int) $payment->monthly_unit_amount : null,
+                'credit_months_purchased' => $payment->credit_months_purchased !== null ? (int) $payment->credit_months_purchased : null,
+                'credit_months_remaining' => $remaining,
+                'consumptions_count' => $consumptionsCount,
+                'credit_exhausted_at' => $payment->credit_exhausted_at?->format('Y-m-d H:i:s'),
+                'status' => (string) $payment->status,
+                'is_refunded' => $payment->isRefunded(),
+            ];
+        }
+
+        return [
+            'available_months' => $availableMonths,
+            'payment_count' => $payments->count(),
+            'payments' => $paymentRows,
+        ];
+    }
+
+    /**
      * Consomme le prochain mois de crédit disponible pour l'abonnement (FIFO : paid_at, puis id).
      *
      * @throws SubscriptionRenewalException
@@ -294,6 +357,50 @@ class SubscriptionService
         $this->refreshPaymentCreditExhaustionState($lockedPayment);
 
         return $consumption->fresh(['payment', 'subscription']);
+    }
+
+    private function remainingCreditMonthsForPayment(Payment $payment): int
+    {
+        if ($payment->credit_months_purchased === null) {
+            return 0;
+        }
+
+        $consumedCount = (int) ($payment->consumptions_count ?? $payment->consumptions()->count());
+
+        return max(0, (int) $payment->credit_months_purchased - $consumedCount);
+    }
+
+    private function paymentContributesToConsumableCredit(Subscription $subscription, Payment $payment, int $remaining): bool
+    {
+        if ($subscription->isTerminated()) {
+            return false;
+        }
+
+        if ($remaining <= 0) {
+            return false;
+        }
+
+        if (! $payment->isPaid() || $payment->paid_at === null) {
+            return false;
+        }
+
+        if ($payment->isRefunded()) {
+            return false;
+        }
+
+        if ($payment->credit_months_purchased === null || $payment->monthly_unit_amount === null) {
+            return false;
+        }
+
+        if ((int) $payment->monthly_unit_amount <= 0) {
+            return false;
+        }
+
+        if ((string) $payment->currency !== (string) $subscription->currency) {
+            return false;
+        }
+
+        return true;
     }
 
     private function findNextFifoEligiblePaymentForSubscription(Subscription $subscription): ?Payment
