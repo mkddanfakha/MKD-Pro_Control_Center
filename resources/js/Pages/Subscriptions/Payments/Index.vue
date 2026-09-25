@@ -199,7 +199,19 @@ function isNextLink(link) {
     return link.label.includes('Next') || link.label.includes('Suivant') || link.label.includes('&raquo;');
 }
 
+function paymentConsumptionCount(payment) {
+    return Number(payment?.consumptions_count ?? 0);
+}
+
+function canDeletePayment(payment) {
+    return paymentConsumptionCount(payment) === 0;
+}
+
 function openDeleteConfirm(payment) {
+    if (!canDeletePayment(payment)) {
+        return;
+    }
+
     paymentPendingDelete.value = payment;
 }
 
@@ -240,6 +252,14 @@ function confirmDelete() {
                 role="status"
             >
                 {{ page.flash.success }}
+            </div>
+
+            <div
+                v-if="page.props.errors?.payment"
+                class="mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-950"
+                role="alert"
+            >
+                {{ Array.isArray(page.props.errors.payment) ? page.props.errors.payment[0] : page.props.errors.payment }}
             </div>
 
             <div
@@ -560,15 +580,24 @@ function confirmDelete() {
                                             >
                                                 Modifier
                                             </Link>
-                                            <button
-                                                type="button"
-                                                class="text-sm font-medium text-red-700 underline-offset-2 hover:text-red-900 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-red-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
-                                                :disabled="deletingId === payment.id"
-                                                :aria-busy="deletingId === payment.id"
-                                                @click="openDeleteConfirm(payment)"
-                                            >
-                                                {{ deletingId === payment.id ? 'Suppression…' : 'Supprimer' }}
-                                            </button>
+                                            <div class="flex flex-col items-start gap-1">
+                                                <button
+                                                    type="button"
+                                                    class="text-sm font-medium text-red-700 underline-offset-2 hover:text-red-900 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-red-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:no-underline disabled:text-gray-400 disabled:opacity-100"
+                                                    :disabled="deletingId === payment.id || !canDeletePayment(payment)"
+                                                    :aria-busy="deletingId === payment.id"
+                                                    :aria-disabled="!canDeletePayment(payment)"
+                                                    @click="openDeleteConfirm(payment)"
+                                                >
+                                                    {{ deletingId === payment.id ? 'Suppression…' : 'Supprimer' }}
+                                                </button>
+                                                <p
+                                                    v-if="!canDeletePayment(payment)"
+                                                    class="text-xs text-gray-500"
+                                                >
+                                                    Crédit consommé
+                                                </p>
+                                            </div>
                                         </div>
                                     </td>
                                 </tr>

@@ -44,7 +44,8 @@ class PaymentController extends Controller
         $query = Payment::query()
             ->with([
                 'subscription.installation.client',
-            ]);
+            ])
+            ->withCount('consumptions');
 
         if (filled($validated['status'] ?? null)) {
             $query->where('status', $validated['status']);
