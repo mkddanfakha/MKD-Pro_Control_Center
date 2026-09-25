@@ -14,6 +14,7 @@ use DateTimeInterface;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
+use Inertia\Response;
 
 class InstallationController extends Controller
 {
@@ -26,15 +27,29 @@ class InstallationController extends Controller
     /**
      * Display a listing of the resource.
      */
-    public function index()
+    public function index(Request $request): Response
     {
-        $installations = Installation::query()
+        $validated = $request->validate([
+            'status' => [
+                'nullable',
+                Rule::in(['active', 'inactive', 'suspended', 'terminated']),
+            ],
+        ]);
+
+        $query = Installation::query()
             ->with([
                 'client',
                 'subscriptions' => fn ($query) => $query->orderByDesc('id'),
-            ])
+            ]);
+
+        if (filled($validated['status'] ?? null)) {
+            $query->where('status', $validated['status']);
+        }
+
+        $installations = $query
             ->orderByDesc('id')
             ->paginate(15)
+            ->withQueryString()
             ->through(fn (Installation $installation) => array_merge(
                 $this->serializeInstallationForIndex($installation),
                 [
@@ -44,6 +59,9 @@ class InstallationController extends Controller
 
         return Inertia::render('Installations/Index', [
             'installations' => $installations,
+            'filters' => [
+                'status' => $validated['status'] ?? null,
+            ],
         ]);
     }
 

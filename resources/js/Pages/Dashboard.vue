@@ -223,32 +223,41 @@ function activityBadgeClass(type) {
                     </h2>
 
                     <dl class="mt-6 grid gap-4 sm:grid-cols-3">
-                        <div class="rounded-lg bg-gray-50 px-4 py-3 ring-1 ring-gray-100">
+                        <Link
+                            href="/installations?status=active"
+                            class="block rounded-lg bg-gray-50 px-4 py-3 ring-1 ring-gray-100 transition hover:bg-gray-100 hover:ring-gray-200"
+                        >
                             <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
                                 Actives
                             </dt>
                             <dd class="mt-1 text-2xl font-bold text-sky-800">
                                 {{ formatCount(activeInstallations) }}
                             </dd>
-                        </div>
+                        </Link>
 
-                        <div class="rounded-lg bg-gray-50 px-4 py-3 ring-1 ring-gray-100">
+                        <Link
+                            href="/installations?status=suspended"
+                            class="block rounded-lg bg-gray-50 px-4 py-3 ring-1 ring-gray-100 transition hover:bg-gray-100 hover:ring-gray-200"
+                        >
                             <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
                                 Suspendues
                             </dt>
                             <dd class="mt-1 text-2xl font-bold text-amber-900">
                                 {{ formatCount(suspendedInstallations) }}
                             </dd>
-                        </div>
+                        </Link>
 
-                        <div class="rounded-lg bg-gray-50 px-4 py-3 ring-1 ring-gray-100">
+                        <Link
+                            href="/installations?status=terminated"
+                            class="block rounded-lg bg-gray-50 px-4 py-3 ring-1 ring-gray-100 transition hover:bg-gray-100 hover:ring-gray-200"
+                        >
                             <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
                                 Terminées
                             </dt>
                             <dd class="mt-1 text-2xl font-bold text-gray-700">
                                 {{ formatCount(terminatedInstallations) }}
                             </dd>
-                        </div>
+                        </Link>
                     </dl>
                 </section>
 
@@ -259,41 +268,53 @@ function activityBadgeClass(type) {
                     </h2>
 
                     <dl class="mt-6 grid gap-4 sm:grid-cols-2">
-                        <div class="rounded-lg bg-gray-50 px-4 py-3 ring-1 ring-gray-100">
+                        <Link
+                            href="/subscriptions?status=active"
+                            class="block rounded-lg bg-gray-50 px-4 py-3 ring-1 ring-gray-100 transition hover:bg-gray-100 hover:ring-gray-200"
+                        >
                             <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
                                 Actifs
                             </dt>
                             <dd class="mt-1 text-2xl font-bold text-sky-800">
                                 {{ formatCount(activeSubscriptions) }}
                             </dd>
-                        </div>
+                        </Link>
 
-                        <div class="rounded-lg bg-gray-50 px-4 py-3 ring-1 ring-gray-100">
+                        <Link
+                            href="/subscriptions?status=grace_period"
+                            class="block rounded-lg bg-gray-50 px-4 py-3 ring-1 ring-gray-100 transition hover:bg-gray-100 hover:ring-gray-200"
+                        >
                             <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
                                 Période de grâce
                             </dt>
                             <dd class="mt-1 text-2xl font-bold text-amber-900">
                                 {{ formatCount(gracePeriodSubscriptions) }}
                             </dd>
-                        </div>
+                        </Link>
 
-                        <div class="rounded-lg bg-gray-50 px-4 py-3 ring-1 ring-gray-100">
+                        <Link
+                            href="/subscriptions?status=suspended"
+                            class="block rounded-lg bg-gray-50 px-4 py-3 ring-1 ring-gray-100 transition hover:bg-gray-100 hover:ring-gray-200"
+                        >
                             <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
                                 Suspendus
                             </dt>
                             <dd class="mt-1 text-2xl font-bold text-orange-900">
                                 {{ formatCount(suspendedSubscriptions) }}
                             </dd>
-                        </div>
+                        </Link>
 
-                        <div class="rounded-lg bg-gray-50 px-4 py-3 ring-1 ring-gray-100">
+                        <Link
+                            href="/subscriptions?status=terminated"
+                            class="block rounded-lg bg-gray-50 px-4 py-3 ring-1 ring-gray-100 transition hover:bg-gray-100 hover:ring-gray-200"
+                        >
                             <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
                                 Terminés
                             </dt>
                             <dd class="mt-1 text-2xl font-bold text-gray-700">
                                 {{ formatCount(terminatedSubscriptions) }}
                             </dd>
-                        </div>
+                        </Link>
                     </dl>
                 </section>
             </div>
@@ -314,41 +335,41 @@ function activityBadgeClass(type) {
                         </dd>
                     </div>
 
-                    <div>
+                    <Link href="/payments?status=paid">
                         <dt class="text-sm font-medium text-gray-500">
                             Payés
                         </dt>
                         <dd class="mt-1 text-xl font-bold text-emerald-800">
                             {{ formatCount(paidPayments) }}
                         </dd>
-                    </div>
+                    </Link>
 
-                    <div>
+                    <Link href="/payments?status=pending">
                         <dt class="text-sm font-medium text-gray-500">
                             En attente
                         </dt>
                         <dd class="mt-1 text-xl font-bold text-amber-900">
                             {{ formatCount(pendingPayments) }}
                         </dd>
-                    </div>
+                    </Link>
 
-                    <div>
+                    <Link href="/payments?status=failed">
                         <dt class="text-sm font-medium text-gray-500">
                             Échoués
                         </dt>
                         <dd class="mt-1 text-xl font-bold text-red-800">
                             {{ formatCount(failedPayments) }}
                         </dd>
-                    </div>
+                    </Link>
 
-                    <div>
+                    <Link href="/payments?status=refunded">
                         <dt class="text-sm font-medium text-gray-500">
                             Remboursés
                         </dt>
                         <dd class="mt-1 text-xl font-bold text-gray-700">
                             {{ formatCount(refundedPayments) }}
                         </dd>
-                    </div>
+                    </Link>
 
                     <div class="sm:col-span-2 lg:col-span-3 xl:col-span-1">
                         <dt class="text-sm font-medium text-gray-500">

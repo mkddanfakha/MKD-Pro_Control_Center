@@ -71,6 +71,44 @@ class DashboardAlertDeepLinksTest extends TestCase
         $this->assertStringContainsString('href="/payments?overdue=1"', $contents);
     }
 
+    public function test_dashboard_vue_subscription_status_cards_use_status_filter_deep_links(): void
+    {
+        $contents = file_get_contents(base_path('resources/js/Pages/Dashboard.vue'));
+
+        $this->assertStringContainsString('href="/subscriptions?status=active"', $contents);
+        $this->assertStringContainsString('href="/subscriptions?status=grace_period"', $contents);
+        $this->assertStringContainsString('href="/subscriptions?status=suspended"', $contents);
+        $this->assertStringContainsString('href="/subscriptions?status=terminated"', $contents);
+    }
+
+    public function test_dashboard_vue_payment_status_cards_use_status_filter_deep_links(): void
+    {
+        $contents = file_get_contents(base_path('resources/js/Pages/Dashboard.vue'));
+
+        $this->assertStringContainsString('href="/payments?status=paid"', $contents);
+        $this->assertStringContainsString('href="/payments?status=pending"', $contents);
+        $this->assertStringContainsString('href="/payments?status=failed"', $contents);
+        $this->assertStringContainsString('href="/payments?status=refunded"', $contents);
+    }
+
+    public function test_dashboard_vue_alert_deep_links_remain_present(): void
+    {
+        $contents = file_get_contents(base_path('resources/js/Pages/Dashboard.vue'));
+
+        $this->assertStringContainsString('href="/subscriptions?expiring_within_days=7"', $contents);
+        $this->assertStringContainsString('href="/payments?overdue=1"', $contents);
+    }
+
+    public function test_dashboard_vue_installation_status_cards_use_status_filter_deep_links(): void
+    {
+        $contents = file_get_contents(base_path('resources/js/Pages/Dashboard.vue'));
+
+        $this->assertStringContainsString('href="/installations?status=active"', $contents);
+        $this->assertStringContainsString('href="/installations?status=suspended"', $contents);
+        $this->assertStringContainsString('href="/installations?status=terminated"', $contents);
+        $this->assertStringNotContainsString('href="/installations?status=inactive"', $contents);
+    }
+
     /**
      * @param  array<string, mixed>  $attributes
      */
