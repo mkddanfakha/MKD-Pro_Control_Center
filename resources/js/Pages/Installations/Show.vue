@@ -129,19 +129,15 @@ function accessPrimaryLabel(access) {
 
 function accessDetailLabel(access) {
     if (!access) {
-        return 'Aucun abonnement';
+        return 'Aucun abonnement courant';
     }
 
     if (access.status === 'suspended') {
         return 'Abonnement suspendu';
     }
 
-    if (access.status === 'terminated') {
-        return 'Abonnement terminé';
-    }
-
-    if (access.status === 'no_subscription') {
-        return 'Aucun abonnement';
+    if (access.status === 'no_subscription' || access.status === 'terminated') {
+        return 'Aucun abonnement courant';
     }
 
     if (access.subscription_status === 'grace_period') {
@@ -614,12 +610,20 @@ function paymentsCountLabel(count) {
                         </div>
                     </dl>
 
-                    <div class="mt-4">
+                    <div class="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
                         <Link
                             href="/payments"
                             class="text-sm font-medium text-gray-700 underline-offset-2 hover:text-gray-900 hover:underline"
                         >
                             Voir les paiements
+                        </Link>
+
+                        <Link
+                            v-if="paymentsSummary?.last_payment?.id"
+                            :href="`/payments/${paymentsSummary.last_payment.id}`"
+                            class="text-sm font-medium text-gray-700 underline-offset-2 hover:text-gray-900 hover:underline"
+                        >
+                            Voir le dernier paiement
                         </Link>
                     </div>
                 </section>

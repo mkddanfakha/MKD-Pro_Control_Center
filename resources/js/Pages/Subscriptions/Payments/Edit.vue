@@ -62,6 +62,21 @@ const showCustomPaymentMethodOption = computed(() => {
 
 const paidAtRequired = computed(() => form.status === 'paid' || form.status === 'refunded');
 
+const creditConsumptionCount = computed(() => Number(props.payment.consumptions_count ?? 0));
+
+const hasCreditConsumption = computed(() => creditConsumptionCount.value > 0);
+
+const hasLegacyRenewalApplied = computed(
+    () => ! hasCreditConsumption.value && props.payment.renewal_applied_at != null && props.payment.renewal_applied_at !== '',
+);
+
+const financialFieldsLocked = computed(() => hasCreditConsumption.value || hasLegacyRenewalApplied.value);
+
+const statusLocked = computed(() => financialFieldsLocked.value);
+
+const lockedFieldClass =
+    'mt-2 block w-full cursor-not-allowed rounded-lg border border-gray-300 bg-gray-50 px-4 py-3 text-sm text-gray-700 outline-none';
+
 watch(
     () => form.status,
     (status) => {
@@ -118,6 +133,22 @@ const submit = () => {
                 class="mt-8 space-y-8"
                 @submit.prevent="submit"
             >
+                <div
+                    v-if="hasCreditConsumption"
+                    class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950"
+                    role="status"
+                >
+                    Ce paiement a déjà financé une ou plusieurs périodes. Les informations financières concernées ne peuvent plus être modifiées.
+                </div>
+
+                <div
+                    v-else-if="hasLegacyRenewalApplied"
+                    class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950"
+                    role="status"
+                >
+                    Ce paiement a déjà servi à un renouvellement. Les informations financières concernées ne peuvent plus être modifiées.
+                </div>
+
                 <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">
                     <h2 class="text-lg font-semibold text-gray-900">
                         Abonnement
@@ -139,8 +170,8 @@ const submit = () => {
                         <select
                             id="subscription_id"
                             v-model="form.subscription_id"
-                            :class="inputClass"
-                            :disabled="form.processing"
+                            :class="financialFieldsLocked ? lockedFieldClass : inputClass"
+                            :disabled="form.processing || financialFieldsLocked"
                             :aria-invalid="!!form.errors.subscription_id"
                             :aria-describedby="form.errors.subscription_id ? 'subscription_id-error' : undefined"
                         >
@@ -189,8 +220,10 @@ const submit = () => {
                                     type="number"
                                     min="0"
                                     step="1"
-                                    class="block w-full rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none transition focus:border-gray-900 focus:ring-2 focus:ring-gray-200"
-                                    :disabled="form.processing"
+                                    :class="financialFieldsLocked
+                                        ? 'block w-full cursor-not-allowed rounded-lg border border-gray-300 bg-gray-50 px-4 py-3 text-sm text-gray-700 outline-none'
+                                        : 'block w-full rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none transition focus:border-gray-900 focus:ring-2 focus:ring-gray-200'"
+                                    :disabled="form.processing || financialFieldsLocked"
                                     :aria-invalid="!!form.errors.amount"
                                     :aria-describedby="form.errors.amount ? 'amount-error' : undefined"
                                 />
@@ -258,10 +291,10 @@ const submit = () => {
                             <select
                                 id="status"
                                 v-model="form.status"
-                                :class="inputClass"
-                                :disabled="form.processing"
+                                :class="statusLocked ? lockedFieldClass : inputClass"
+                                :disabled="form.processing || statusLocked"
                                 :aria-invalid="!!form.errors.status"
-                                :aria-describedby="form.errors.status ? 'status-error' : undefined"
+                                :aria-describedby="form.errors.status ? 'status-error' : (statusLocked ? 'status-locked-help' : undefined)"
                             >
                                 <option value="pending">
                                     En attente
@@ -283,6 +316,14 @@ const submit = () => {
                                 class="mt-2 text-sm text-red-600"
                             >
                                 {{ form.errors.status }}
+                            </p>
+
+                            <p
+                                v-else-if="statusLocked"
+                                id="status-locked-help"
+                                class="mt-2 text-xs text-gray-500"
+                            >
+                                Le statut doit rester « payé » après consommation de crédit ou renouvellement appliqué.
                             </p>
                         </div>
                     </div>
@@ -373,8 +414,8 @@ const submit = () => {
                                 v-model="form.period_start"
                                 name="period_start"
                                 type="datetime-local"
-                                :class="inputClass"
-                                :disabled="form.processing"
+                                :class="financialFieldsLocked ? lockedFieldClass : inputClass"
+                                :disabled="form.processing || financialFieldsLocked"
                                 :aria-invalid="!!form.errors.period_start"
                                 :aria-describedby="form.errors.period_start ? 'period_start-error' : undefined"
                             />
@@ -401,8 +442,8 @@ const submit = () => {
                                 v-model="form.period_end"
                                 name="period_end"
                                 type="datetime-local"
-                                :class="inputClass"
-                                :disabled="form.processing"
+                                :class="financialFieldsLocked ? lockedFieldClass : inputClass"
+                                :disabled="form.processing || financialFieldsLocked"
                                 :aria-invalid="!!form.errors.period_end"
                                 :aria-describedby="form.errors.period_end ? 'period_end-error' : undefined"
                             />

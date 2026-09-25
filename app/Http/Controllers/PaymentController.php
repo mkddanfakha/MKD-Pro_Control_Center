@@ -189,6 +189,8 @@ class PaymentController extends Controller
      */
     public function edit(Payment $payment): Response
     {
+        $payment->loadCount('consumptions');
+
         return Inertia::render('Subscriptions/Payments/Edit', [
             'payment' => $payment,
             'subscriptions' => $this->subscriptionsForForm(),

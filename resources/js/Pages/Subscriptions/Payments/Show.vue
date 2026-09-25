@@ -675,9 +675,19 @@ function paymentMethodLabel(method) {
 
                 <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">
                     <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                        <h2 class="text-lg font-semibold text-gray-900">
-                            Abonnement
-                        </h2>
+                        <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
+                            <h2 class="text-lg font-semibold text-gray-900">
+                                Abonnement
+                            </h2>
+
+                            <Link
+                                v-if="payment.subscription?.id"
+                                :href="`/subscriptions/${payment.subscription.id}`"
+                                class="text-sm font-medium text-gray-700 underline-offset-2 hover:text-gray-900 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2"
+                            >
+                                Voir la fiche abonnement
+                            </Link>
+                        </div>
 
                         <button
                             v-if="canRenewSubscription"
@@ -769,7 +779,16 @@ function paymentMethodLabel(method) {
                                 Nom
                             </dt>
                             <dd class="mt-1 text-sm font-medium text-gray-900">
-                                {{ displayValue(payment.subscription?.installation?.name) }}
+                                <Link
+                                    v-if="payment.subscription?.installation?.id"
+                                    :href="`/installations/${payment.subscription.installation.id}`"
+                                    class="underline-offset-2 hover:text-gray-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2"
+                                >
+                                    {{ displayValue(payment.subscription.installation.name) }}
+                                </Link>
+                                <template v-else>
+                                    {{ displayValue(payment.subscription?.installation?.name) }}
+                                </template>
                             </dd>
                         </div>
 
@@ -834,7 +853,16 @@ function paymentMethodLabel(method) {
                                 Entreprise
                             </dt>
                             <dd class="mt-1 text-sm font-medium text-gray-900">
-                                {{ displayValue(payment.subscription?.installation?.client?.company_name) }}
+                                <Link
+                                    v-if="payment.subscription?.installation?.client?.id"
+                                    :href="`/clients/${payment.subscription.installation.client.id}`"
+                                    class="underline-offset-2 hover:text-gray-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2"
+                                >
+                                    {{ displayValue(payment.subscription.installation.client.company_name) }}
+                                </Link>
+                                <template v-else>
+                                    {{ displayValue(payment.subscription?.installation?.client?.company_name) }}
+                                </template>
                             </dd>
                         </div>
 

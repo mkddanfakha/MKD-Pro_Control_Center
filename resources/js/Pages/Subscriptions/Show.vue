@@ -462,7 +462,17 @@ function confirmConsumeNextCredit() {
                                     class="rounded-lg border border-gray-200 bg-gray-50/80 p-4 sm:p-5"
                                 >
                                     <div class="flex flex-wrap items-center gap-2">
-                                        <p class="text-sm font-semibold text-gray-900">
+                                        <Link
+                                            v-if="payment.id"
+                                            :href="`/payments/${payment.id}`"
+                                            class="text-sm font-semibold text-gray-900 underline-offset-2 hover:text-gray-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2"
+                                        >
+                                            Paiement #{{ payment.id }}
+                                        </Link>
+                                        <p
+                                            v-else
+                                            class="text-sm font-semibold text-gray-900"
+                                        >
                                             Paiement #{{ payment.id }}
                                         </p>
                                         <span
@@ -560,7 +570,16 @@ function confirmConsumeNextCredit() {
                                 Entreprise
                             </dt>
                             <dd class="mt-1 text-sm font-medium text-gray-900">
-                                {{ displayValue(subscription.installation?.client?.company_name) }}
+                                <Link
+                                    v-if="subscription.installation?.client?.id"
+                                    :href="`/clients/${subscription.installation.client.id}`"
+                                    class="underline-offset-2 hover:text-gray-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2"
+                                >
+                                    {{ displayValue(subscription.installation.client.company_name) }}
+                                </Link>
+                                <template v-else>
+                                    {{ displayValue(subscription.installation?.client?.company_name) }}
+                                </template>
                             </dd>
                         </div>
 
@@ -578,7 +597,16 @@ function confirmConsumeNextCredit() {
                                 Nom
                             </dt>
                             <dd class="mt-1 text-sm font-medium text-gray-900">
-                                {{ displayValue(subscription.installation?.name) }}
+                                <Link
+                                    v-if="subscription.installation?.id"
+                                    :href="`/installations/${subscription.installation.id}`"
+                                    class="underline-offset-2 hover:text-gray-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2"
+                                >
+                                    {{ displayValue(subscription.installation.name) }}
+                                </Link>
+                                <template v-else>
+                                    {{ displayValue(subscription.installation?.name) }}
+                                </template>
                             </dd>
                         </div>
 

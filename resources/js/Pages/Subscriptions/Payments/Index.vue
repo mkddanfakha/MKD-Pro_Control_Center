@@ -475,7 +475,17 @@ function confirmDelete() {
                                     :key="payment.id"
                                 >
                                     <td class="px-4 py-4 sm:px-6">
-                                        <div class="font-medium text-gray-900">
+                                        <Link
+                                            v-if="payment.subscription?.installation?.id"
+                                            :href="`/installations/${payment.subscription.installation.id}`"
+                                            class="font-medium text-gray-900 underline-offset-2 hover:text-gray-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2"
+                                        >
+                                            {{ displayValue(payment.subscription.installation.name) }}
+                                        </Link>
+                                        <div
+                                            v-else
+                                            class="font-medium text-gray-900"
+                                        >
                                             {{ displayValue(payment.subscription?.installation?.name) }}
                                         </div>
                                         <div
@@ -484,9 +494,26 @@ function confirmDelete() {
                                         >
                                             {{ payment.subscription.installation.subdomain }}
                                         </div>
+                                        <Link
+                                            v-if="payment.subscription?.id"
+                                            :href="`/subscriptions/${payment.subscription.id}`"
+                                            class="mt-1 inline-block text-xs font-medium text-gray-600 underline-offset-2 hover:text-gray-900 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2"
+                                        >
+                                            Voir l’abonnement
+                                        </Link>
                                     </td>
                                     <td class="px-4 py-4 sm:px-6">
-                                        <div class="font-medium text-gray-900">
+                                        <Link
+                                            v-if="payment.subscription?.installation?.client?.id"
+                                            :href="`/clients/${payment.subscription.installation.client.id}`"
+                                            class="font-medium text-gray-900 underline-offset-2 hover:text-gray-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2"
+                                        >
+                                            {{ displayValue(payment.subscription.installation.client.company_name) }}
+                                        </Link>
+                                        <div
+                                            v-else
+                                            class="font-medium text-gray-900"
+                                        >
                                             {{ displayValue(payment.subscription?.installation?.client?.company_name) }}
                                         </div>
                                         <div

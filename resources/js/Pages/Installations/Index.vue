@@ -97,15 +97,7 @@ function installationStatusBadgeClass(status) {
 }
 
 function accessPrimaryLabel(access) {
-    if (!access || access.status === 'no_subscription') {
-        return 'Accès non autorisé';
-    }
-
-    if (access.status === 'suspended') {
-        return 'Accès non autorisé';
-    }
-
-    if (access.status === 'terminated') {
+    if (!access || !access.accessible) {
         return 'Accès non autorisé';
     }
 
@@ -114,19 +106,15 @@ function accessPrimaryLabel(access) {
 
 function accessDetailLabel(access) {
     if (!access) {
-        return 'Aucun abonnement';
+        return 'Aucun abonnement courant';
     }
 
     if (access.status === 'suspended') {
         return 'Abonnement suspendu';
     }
 
-    if (access.status === 'terminated') {
-        return 'Abonnement terminé';
-    }
-
-    if (access.status === 'no_subscription') {
-        return 'Aucun abonnement';
+    if (access.status === 'no_subscription' || access.status === 'terminated') {
+        return 'Aucun abonnement courant';
     }
 
     if (access.accessible) {

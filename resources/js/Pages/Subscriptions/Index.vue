@@ -431,7 +431,17 @@ function confirmDelete() {
                                     :key="subscription.id"
                                 >
                                     <td class="px-4 py-4 sm:px-6">
-                                        <div class="font-medium text-gray-900">
+                                        <Link
+                                            v-if="subscription.installation?.id"
+                                            :href="`/installations/${subscription.installation.id}`"
+                                            class="font-medium text-gray-900 underline-offset-2 hover:text-gray-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2"
+                                        >
+                                            {{ displayValue(subscription.installation.name) }}
+                                        </Link>
+                                        <div
+                                            v-else
+                                            class="font-medium text-gray-900"
+                                        >
                                             {{ displayValue(subscription.installation?.name) }}
                                         </div>
                                         <div
@@ -442,7 +452,17 @@ function confirmDelete() {
                                         </div>
                                     </td>
                                     <td class="px-4 py-4 sm:px-6">
-                                        <div class="font-medium text-gray-900">
+                                        <Link
+                                            v-if="subscription.installation?.client?.id"
+                                            :href="`/clients/${subscription.installation.client.id}`"
+                                            class="font-medium text-gray-900 underline-offset-2 hover:text-gray-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2"
+                                        >
+                                            {{ displayValue(subscription.installation.client.company_name) }}
+                                        </Link>
+                                        <div
+                                            v-else
+                                            class="font-medium text-gray-900"
+                                        >
                                             {{ displayValue(subscription.installation?.client?.company_name) }}
                                         </div>
                                         <div
