@@ -381,6 +381,14 @@ class PaymentController extends Controller
             $errors['currency'] = 'La devise ne peut pas être modifiée après consommation de crédit.';
         }
 
+        if ($this->normalizedRequestDate($validated['period_start'] ?? null) !== $this->normalizedPaymentDate($payment->period_start)) {
+            $errors['period_start'] = 'La date de début de période ne peut pas être modifiée après consommation de crédit.';
+        }
+
+        if ($this->normalizedRequestDate($validated['period_end'] ?? null) !== $this->normalizedPaymentDate($payment->period_end)) {
+            $errors['period_end'] = 'La date de fin de période ne peut pas être modifiée après consommation de crédit.';
+        }
+
         if ($errors !== []) {
             throw ValidationException::withMessages($errors);
         }

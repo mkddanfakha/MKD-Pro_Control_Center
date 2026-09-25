@@ -6,6 +6,7 @@ use App\Models\Client;
 use App\Models\Installation;
 use App\Models\Payment;
 use App\Models\Subscription;
+use App\Models\SubscriptionPaymentConsumption;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -153,6 +154,152 @@ class PaymentPeriodCoherenceTest extends TestCase
         ]));
 
         $response->assertSessionHasErrors(['period_start', 'period_end']);
+    }
+
+    public function test_update_allows_period_change_when_payment_has_no_consumption(): void
+    {
+        $user = User::factory()->create();
+        $subscription = $this->makeSubscription();
+        $payment = $this->makePayment($subscription, [
+            'status' => Payment::STATUS_PAID,
+            'paid_at' => '2026-10-01 12:00:00',
+            'period_start' => '2026-10-01 00:00:00',
+            'period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        $response = $this->actingAs($user)->put(route('payments.update', $payment), $this->validPayload($subscription, [
+            'status' => Payment::STATUS_PAID,
+            'paid_at' => '2026-10-01 12:00:00',
+            'period_start' => '2026-11-01 00:00:00',
+            'period_end' => '2026-11-30 23:59:59',
+        ]));
+
+        $response->assertRedirect(route('payments.show', $payment));
+
+        $payment->refresh();
+
+        $this->assertSame('2026-11-01 00:00:00', $payment->period_start->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-11-30 23:59:59', $payment->period_end->format('Y-m-d H:i:s'));
+    }
+
+    public function test_update_rejects_period_change_after_credit_consumption(): void
+    {
+        $user = User::factory()->create();
+        $subscription = $this->makeSubscription([
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        $payment = $this->makePayment($subscription, [
+            'amount' => 45000,
+            'status' => Payment::STATUS_PAID,
+            'paid_at' => '2026-10-01 12:00:00',
+            'period_start' => '2026-10-01 00:00:00',
+            'period_end' => '2026-10-31 23:59:59',
+            'credit_months_purchased' => 3,
+        ]);
+
+        SubscriptionPaymentConsumption::query()->create([
+            'payment_id' => $payment->id,
+            'subscription_id' => $subscription->id,
+            'period_start' => '2026-11-01 00:00:00',
+            'period_end' => '2026-11-30 23:59:59',
+            'consumed_at' => '2026-11-01 10:00:00',
+        ]);
+
+        $response = $this->actingAs($user)->put(route('payments.update', $payment), $this->validPayload($subscription, [
+            'amount' => 45000,
+            'status' => Payment::STATUS_PAID,
+            'paid_at' => '2026-10-01 12:00:00',
+            'period_start' => '2026-12-01 00:00:00',
+            'period_end' => '2026-12-31 23:59:59',
+        ]));
+
+        $response->assertSessionHasErrors(['period_start', 'period_end']);
+
+        $payment->refresh();
+
+        $this->assertSame('2026-10-01 00:00:00', $payment->period_start->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-10-31 23:59:59', $payment->period_end->format('Y-m-d H:i:s'));
+    }
+
+    public function test_update_rejects_single_period_field_change_after_credit_consumption(): void
+    {
+        $user = User::factory()->create();
+        $subscription = $this->makeSubscription();
+
+        $payment = $this->makePayment($subscription, [
+            'status' => Payment::STATUS_PAID,
+            'paid_at' => '2026-10-01 12:00:00',
+            'period_start' => '2026-10-01 00:00:00',
+            'period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        SubscriptionPaymentConsumption::query()->create([
+            'payment_id' => $payment->id,
+            'subscription_id' => $subscription->id,
+            'period_start' => '2026-11-01 00:00:00',
+            'period_end' => '2026-11-30 23:59:59',
+            'consumed_at' => '2026-11-01 10:00:00',
+        ]);
+
+        $responseStart = $this->actingAs($user)->put(route('payments.update', $payment), $this->validPayload($subscription, [
+            'status' => Payment::STATUS_PAID,
+            'paid_at' => '2026-10-01 12:00:00',
+            'period_start' => '2026-10-15 00:00:00',
+            'period_end' => '2026-10-31 23:59:59',
+        ]));
+
+        $responseStart->assertSessionHasErrors(['period_start']);
+
+        $payment->refresh();
+        $this->assertSame('2026-10-01 00:00:00', $payment->period_start->format('Y-m-d H:i:s'));
+
+        $responseEnd = $this->actingAs($user)->put(route('payments.update', $payment), $this->validPayload($subscription, [
+            'status' => Payment::STATUS_PAID,
+            'paid_at' => '2026-10-01 12:00:00',
+            'period_start' => '2026-10-01 00:00:00',
+            'period_end' => '2026-10-20 23:59:59',
+        ]));
+
+        $responseEnd->assertSessionHasErrors(['period_end']);
+
+        $payment->refresh();
+        $this->assertSame('2026-10-31 23:59:59', $payment->period_end->format('Y-m-d H:i:s'));
+    }
+
+    public function test_update_allows_reference_change_after_credit_consumption(): void
+    {
+        $user = User::factory()->create();
+        $subscription = $this->makeSubscription();
+
+        $payment = $this->makePayment($subscription, [
+            'status' => Payment::STATUS_PAID,
+            'paid_at' => '2026-10-01 12:00:00',
+            'reference' => 'REF-BEFORE',
+            'period_start' => '2026-10-01 00:00:00',
+            'period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        SubscriptionPaymentConsumption::query()->create([
+            'payment_id' => $payment->id,
+            'subscription_id' => $subscription->id,
+            'period_start' => '2026-11-01 00:00:00',
+            'period_end' => '2026-11-30 23:59:59',
+            'consumed_at' => '2026-11-01 10:00:00',
+        ]);
+
+        $response = $this->actingAs($user)->put(route('payments.update', $payment), $this->validPayload($subscription, [
+            'status' => Payment::STATUS_PAID,
+            'paid_at' => '2026-10-01 12:00:00',
+            'reference' => 'REF-AFTER',
+            'period_start' => '2026-10-01 00:00:00',
+            'period_end' => '2026-10-31 23:59:59',
+        ]));
+
+        $response->assertRedirect(route('payments.show', $payment));
+
+        $this->assertSame('REF-AFTER', $payment->fresh()->reference);
     }
 
     /**
