@@ -323,6 +323,40 @@ class SubscriptionUpdateTest extends TestCase
         $this->assertSame(Subscription::STATUS_TERMINATED, $subscription->status);
     }
 
+    public function test_amount_change_to_20000_does_not_modify_period_dates(): void
+    {
+        $user = User::factory()->create();
+        $subscription = $this->makeSubscription([
+            'status' => Subscription::STATUS_ACTIVE,
+            'amount' => 15000,
+            'starts_at' => '2026-10-01 00:00:00',
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        $periodBefore = [
+            'starts_at' => $subscription->starts_at->format('Y-m-d H:i:s'),
+            'current_period_start' => $subscription->current_period_start->format('Y-m-d H:i:s'),
+            'current_period_end' => $subscription->current_period_end->format('Y-m-d H:i:s'),
+        ];
+
+        $response = $this->actingAs($user)->put(
+            route('subscriptions.update', $subscription),
+            $this->validUpdatePayload($subscription, [
+                'amount' => 20000,
+            ]),
+        );
+
+        $response->assertRedirect(route('subscriptions.show', $subscription));
+
+        $subscription->refresh();
+
+        $this->assertSame(20000, $subscription->amount);
+        $this->assertSame($periodBefore['starts_at'], $subscription->starts_at->format('Y-m-d H:i:s'));
+        $this->assertSame($periodBefore['current_period_start'], $subscription->current_period_start->format('Y-m-d H:i:s'));
+        $this->assertSame($periodBefore['current_period_end'], $subscription->current_period_end->format('Y-m-d H:i:s'));
+    }
+
     public function test_active_amount_and_notes_can_be_updated(): void
     {
         $user = User::factory()->create();

@@ -121,6 +121,51 @@ class PaymentCreditHttpTest extends TestCase
         $this->assertSame($countBefore, Payment::query()->count());
     }
 
+    public function test_pending_payment_update_after_subscription_price_change_uses_current_tariff_for_recalculation(): void
+    {
+        $user = User::factory()->create();
+        $subscription = $this->makeSubscription(['amount' => 15000]);
+
+        $storeResponse = $this->actingAs($user)->post(route('payments.store'), $this->validPayload($subscription, [
+            'amount' => 15000,
+            'status' => Payment::STATUS_PENDING,
+        ]));
+
+        $storeResponse->assertRedirect();
+
+        $payment = Payment::query()->where('subscription_id', $subscription->id)->sole();
+
+        $this->assertSame(15000, (int) $payment->monthly_unit_amount);
+        $this->assertSame(1, (int) $payment->credit_months_purchased);
+
+        $this->actingAs($user)->put(
+            route('subscriptions.update', $subscription),
+            [
+                'installation_id' => $subscription->installation_id,
+                'amount' => 20000,
+                'currency' => $subscription->currency,
+                'status' => $subscription->status,
+                'notes' => $subscription->notes,
+            ],
+        )->assertRedirect();
+
+        $subscription->refresh();
+
+        $updateResponse = $this->actingAs($user)->put(route('payments.update', $payment), $this->validPayload($subscription, [
+            'amount' => 15000,
+            'status' => Payment::STATUS_PAID,
+            'paid_at' => '2026-10-15 12:00:00',
+        ]));
+
+        $updateResponse->assertSessionHasErrors('amount');
+
+        $payment->refresh();
+
+        $this->assertSame(Payment::STATUS_PENDING, $payment->status);
+        $this->assertSame(15000, (int) $payment->monthly_unit_amount);
+        $this->assertSame(1, (int) $payment->credit_months_purchased);
+    }
+
     public function test_update_recalculates_credit_when_no_consumption_exists(): void
     {
         $user = User::factory()->create();

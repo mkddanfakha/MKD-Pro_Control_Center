@@ -8,6 +8,7 @@ use App\Models\Installation;
 use App\Models\Payment;
 use App\Models\Subscription;
 use App\Models\SubscriptionPaymentConsumption;
+use App\Models\User;
 use App\Services\SubscriptionService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Event;
@@ -328,6 +329,114 @@ class SubscriptionCreditConsumptionTest extends TestCase
         $this->assertSame(2, $paymentB->remainingCreditMonths());
         $this->assertSame(2, SubscriptionPaymentConsumption::query()->where('payment_id', $paymentA->id)->count());
         $this->assertSame(1, SubscriptionPaymentConsumption::query()->where('payment_id', $paymentB->id)->count());
+    }
+
+    public function test_historical_payment_unchanged_when_subscription_amount_increases_to_20000(): void
+    {
+        $subscription = $this->makeSubscription(['amount' => 15000]);
+        $payment = $this->makePaidPayment($subscription, 90000, 6);
+
+        $this->updateSubscriptionAmountViaHttp($subscription, 20000);
+
+        $payment->refresh();
+        $subscription->refresh();
+
+        $this->assertSame(20000, (int) $subscription->amount);
+        $this->assertSame(90000, (int) $payment->amount);
+        $this->assertSame(15000, (int) $payment->monthly_unit_amount);
+        $this->assertSame(6, (int) $payment->credit_months_purchased);
+        $this->assertSame(0, SubscriptionPaymentConsumption::query()->where('payment_id', $payment->id)->count());
+    }
+
+    public function test_new_payment_after_price_change_uses_current_subscription_amount(): void
+    {
+        $user = User::factory()->create();
+        $subscription = $this->makeSubscription(['amount' => 15000]);
+
+        $this->updateSubscriptionAmountViaHttp($subscription, 20000);
+
+        $response = $this->actingAs($user)->post(route('payments.store'), [
+            'subscription_id' => $subscription->id,
+            'amount' => 60000,
+            'currency' => 'XOF',
+            'status' => Payment::STATUS_PAID,
+            'paid_at' => '2026-10-20 12:00:00',
+            'payment_method' => 'wave',
+            'reference' => 'REF-PRICE-CHANGE',
+        ]);
+
+        $response->assertRedirect();
+
+        $payment = Payment::query()->where('subscription_id', $subscription->id)->sole();
+
+        $this->assertSame(60000, (int) $payment->amount);
+        $this->assertSame(20000, (int) $payment->monthly_unit_amount);
+        $this->assertSame(3, (int) $payment->credit_months_purchased);
+    }
+
+    public function test_existing_credit_consumption_after_price_change_remains_month_based(): void
+    {
+        $subscription = $this->makeSubscription([
+            'amount' => 15000,
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        $payment = $this->makePaidPayment($subscription, 90000, 6);
+
+        $this->updateSubscriptionAmountViaHttp($subscription, 20000);
+
+        $consumption = $this->service->consumeCreditFromPayment($payment->fresh());
+
+        $payment->refresh();
+        $subscription->refresh();
+
+        $this->assertSame(1, SubscriptionPaymentConsumption::query()->where('payment_id', $payment->id)->count());
+        $this->assertSame('2026-11-01 00:00:00', $consumption->period_start->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-11-30 23:59:59', $consumption->period_end->format('Y-m-d H:i:s'));
+        $this->assertSame(5, $payment->remainingCreditMonths());
+        $this->assertSame(15000, (int) $payment->monthly_unit_amount);
+        $this->assertSame(6, (int) $payment->credit_months_purchased);
+        $this->assertSame(20000, (int) $subscription->amount);
+    }
+
+    public function test_legacy_renew_compares_payment_amount_to_current_subscription_amount(): void
+    {
+        $subscription = $this->makeSubscription([
+            'amount' => 15000,
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        $payment = $this->makePaidPayment($subscription, 15000, 1);
+
+        $subscription->update(['amount' => 20000]);
+        $subscription->refresh();
+
+        $this->assertSame(15000, (int) $payment->fresh()->amount);
+
+        $this->expectException(SubscriptionRenewalException::class);
+        $this->expectExceptionMessage('montant du paiement');
+
+        $this->service->renew($subscription, $payment->fresh());
+    }
+
+    private function updateSubscriptionAmountViaHttp(Subscription $subscription, int $amount): void
+    {
+        $user = User::factory()->create();
+
+        $this->actingAs($user)->put(
+            route('subscriptions.update', $subscription),
+            [
+                'installation_id' => $subscription->installation_id,
+                'amount' => $amount,
+                'currency' => $subscription->currency,
+                'status' => $subscription->status,
+                'notes' => $subscription->notes,
+            ],
+        )->assertRedirect(route('subscriptions.show', $subscription));
+
+        $subscription->refresh();
     }
 
     /**

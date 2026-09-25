@@ -104,6 +104,35 @@ class SubscriptionCreditFifoTest extends TestCase
         $this->assertSame(0, SubscriptionPaymentConsumption::query()->where('payment_id', $otherPaymentId)->count());
     }
 
+    public function test_fifo_respects_historical_rates_after_subscription_price_change(): void
+    {
+        $subscription = $this->makeSubscription(['amount' => 15000]);
+
+        $paymentA = $this->makePaidPayment($subscription, 90000, 6, [
+            'paid_at' => '2026-09-01 10:00:00',
+        ]);
+
+        $subscription->update(['amount' => 20000]);
+        $subscription->refresh();
+
+        $paymentB = $this->makePaidPayment($subscription, 60000, 3, [
+            'paid_at' => '2026-09-05 10:00:00',
+        ]);
+
+        $this->assertSame(15000, (int) $paymentA->fresh()->monthly_unit_amount);
+        $this->assertSame(20000, (int) $paymentB->fresh()->monthly_unit_amount);
+
+        $first = $this->service->consumeNextCreditForSubscription($subscription);
+        $second = $this->service->consumeNextCreditForSubscription($subscription->fresh());
+
+        $this->assertSame($paymentA->id, $first->payment_id);
+        $this->assertSame($paymentA->id, $second->payment_id);
+        $this->assertSame(2, SubscriptionPaymentConsumption::query()->where('payment_id', $paymentA->id)->count());
+        $this->assertSame(0, SubscriptionPaymentConsumption::query()->where('payment_id', $paymentB->id)->count());
+        $this->assertSame(4, $paymentA->fresh()->remainingCreditMonths());
+        $this->assertSame(3, $paymentB->fresh()->remainingCreditMonths());
+    }
+
     public function test_fifo_keeps_using_partially_consumed_payment_before_later_payment(): void
     {
         $subscription = $this->makeSubscription();
