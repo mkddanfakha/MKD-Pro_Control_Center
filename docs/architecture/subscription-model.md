@@ -5,12 +5,13 @@ Complète [`status-lifecycle.md`](status-lifecycle.md) (séparation `Installatio
 
 Dernière mise à jour modèle crédit : **25/09/2026** (Tasks 89–100, doc Task 103).
 Dernière alignement doc / code (Installation ↔ Subscription ↔ Access) : **25/09/2026** (Task 147).
+Dernier alignement doc / tarif (défaut, courant, crédit historique) : **25/09/2026** (Task 183).
 
 ---
 
 ## Vue d’ensemble
 
-Modèle commercial cible (15 000 FCFA / mois, crédit multi-mois par paiement, consommation progressive, une installation par client) :
+Modèle commercial cible (tarif mensuel **par abonnement** via `subscriptions.amount`, crédit multi-mois par paiement, consommation progressive, une installation par client). **15 000 FCFA / mois** n’est qu’un **exemple** courant et la **valeur par défaut produit** à la création — ce n’est **pas** un tarif obligatoire pour tous les abonnements :
 
 ```text
 Installation
@@ -41,8 +42,41 @@ La subscription courante (ligne `subscriptions` retenue pour une installation) c
 | `grace_period_ends_at` | Fin de la période de grâce après expiration de la période courante |
 | `suspended_at` | Horodatage de passage en suspension (cycle ou saisie) |
 | `terminated_at` | Horodatage de terminaison définitive |
+| `amount` | **Tarif mensuel courant** de référence pour cet abonnement (source de vérité du tarif en vigueur) |
+| `currency` | Devise du tarif (ex. `XOF`) |
 
-Montant et devise (`amount`, `currency`) décrivent le tarif de référence de l’abonnement (ex. 15 000 XOF).
+Le montant **15 000 XOF** cité ailleurs dans ce document sert d’**illustration** ou reflète le **défaut produit actuel** ; chaque abonnement peut avoir un autre tarif valide (ex. **20 000 XOF**).
+
+### Défaut à la création (`config/subscriptions.php`)
+
+| Élément | Rôle |
+|--------|------|
+| `default_monthly_amount` | Montant mensuel **par défaut** si aucun `amount` explicite n’est fourni à la création (`SubscriptionController::store`) |
+| Accès code | `config('subscriptions.default_monthly_amount')` |
+| UI | Préremplissage des formulaires via la prop Inertia `defaultMonthlyAmount` (création abonnement et création paiement) |
+
+Cette configuration :
+
+- **n’est pas** le tarif universel du produit ;
+- **ne modifie pas** les abonnements, paiements ou crédits **déjà en base** lorsqu’on change le fichier de config ;
+- **ne reprice pas** l’historique.
+
+Après création, le tarif réel de l’abonnement est toujours **`subscriptions.amount`** (y compris si une autre valeur a été saisie ou modifiée ensuite).
+
+### Changement du tarif courant (`Subscription.amount`)
+
+La mise à jour de `amount` sur une subscription existante modifie le **tarif courant** pour les **nouveaux** calculs de crédit serveur (création ou modification de paiement **sans consommation**).
+
+Elle **ne** :
+
+- recalcule **pas** automatiquement `current_period_start`, `current_period_end`, `grace_period_ends_at` ni le `status` du seul fait du changement de tarif (sauf champs explicitement envoyés dans la mise à jour) ;
+- **repricet pas** les paiements historiques (`payments.amount` reste le montant encaissé enregistré) ;
+- **repricet pas** le crédit historique (`monthly_unit_amount` et `credit_months_purchased` **figés** sur un paiement restent tels qu’au moment du calcul serveur) ;
+- **altère pas** les consommations déjà enregistrées (`subscription_payment_consumptions`).
+
+Un **ancien crédit** continue d’être consommé **en mois** (une consommation = un mois débité), indépendamment du nouveau tarif courant.
+
+**Exemple :** abonnement à **15 000 XOF**, paiement **90 000 XOF** → `monthly_unit_amount = 15000`, `credit_months_purchased = 6`. Si le tarif courant passe à **20 000 XOF**, ces **6 mois** historiques **ne sont pas** recalculés à 20 000 XOF ; seuls les **nouveaux** paiements utiliseront **20 000** comme mensualité de calcul.
 
 ---
 
@@ -50,15 +84,25 @@ Montant et devise (`amount`, `currency`) décrivent le tarif de référence de l
 
 ### Rôle d’un `Payment`
 
-Un paiement représente à la fois :
+Distinction des montants sur un paiement :
+
+| Champ | Signification |
+|-------|----------------|
+| `amount` | Montant **financier** encaissé / enregistré pour ce paiement |
+| `monthly_unit_amount` | Tarif mensuel **historique** retenu au **calcul serveur** du crédit (snapshot de `Subscription.amount` **au moment** de ce calcul) |
+| `credit_months_purchased` | Nombre entier de **mois de crédit** achetés (`amount ÷ monthly_unit_amount` au calcul, division exacte) |
+
+Les lignes **`subscription_payment_consumptions`** représentent les mois de crédit **effectivement consommés** (une ligne = un mois de période financée). Le crédit **restant** se déduit du nombre de mois achetés moins le nombre de consommations — pas d’un recalcul au tarif courant après coup.
+
+Un paiement représente donc à la fois :
 
 - un **encaissement financier** (`amount`, `currency`, `status`, `paid_at`, …) ;
-- un **nombre de mois de crédit achetés** (`credit_months_purchased`) ;
-- une **mensualité de référence figée** au moment du paiement (`monthly_unit_amount`, alignée sur le tarif de l’abonnement au moment du calcul serveur).
+- un **stock de mois** (`credit_months_purchased`) ;
+- une **mensualité de référence figée** pour ce stock (`monthly_unit_amount`).
 
-Ces champs de crédit sont **calculés côté serveur** (`SubscriptionService::calculatePaymentCreditFields`, appliqués via `PaymentController`) ; le navigateur **ne peut pas** les imposer (`monthly_unit_amount` et `credit_months_purchased` sont **interdits** en entrée HTTP).
+Ces champs de crédit sont **calculés côté serveur** (`SubscriptionService::calculatePaymentCreditFields`, appliqués via `PaymentController`) ; le navigateur **ne peut pas** les imposer (`monthly_unit_amount` et `credit_months_purchased` sont **interdits** en entrée HTTP). La preview éventuelle côté Vue est **indicative** ; seul le serveur fait foi.
 
-Exemples (tarif abonnement 15 000 XOF) :
+Exemples **illustratifs** lorsque le **tarif courant** de l’abonnement est **15 000 XOF** au moment du calcul :
 
 | Montant payé | Mois achetés |
 |--------------|--------------|
@@ -67,7 +111,7 @@ Exemples (tarif abonnement 15 000 XOF) :
 | 90 000 XOF | 6 |
 | 180 000 XOF | 12 |
 
-Règles : `monthly_unit_amount > 0`, montant **divisible exactement** par la mensualité, **aucune fraction de mois**, devise **identique** à celle de la subscription.
+Règles : `monthly_unit_amount > 0`, montant du paiement **divisible exactement** par le **tarif courant** `Subscription.amount` **au moment du calcul**, **aucune fraction de mois**, devise **identique** à celle de la subscription. Si le tarif courant change plus tard, les champs de crédit **déjà persistés** sur un paiement ne sont **pas** recalculés automatiquement (sauf modification HTTP autorisée **sans** consommation, qui relance le calcul serveur).
 
 ### Source de vérité du crédit restant
 
@@ -98,7 +142,7 @@ Dans le **modèle crédit actuel** :
 
 Un paiement de plusieurs mois **ne déclenche pas** plusieurs avances de période immédiates à l’encaissement.
 
-Exemple : paiement **180 000 XOF**, mensualité **15 000 XOF**, **12** mois achetés.
+Exemple **illustratif** : paiement **180 000 XOF**, avec `monthly_unit_amount = 15 000 XOF` figé sur ce paiement, **12** mois achetés.
 
 | Événement | Effet |
 |-----------|--------|
@@ -165,6 +209,19 @@ Les deux parcours convergent vers **`performCreditConsumption()`** ; le frontend
 - **Service** : `renewFromPayment()` → `consumeCreditFromPayment()` sur **ce** paiement
 
 Il s’agit d’un parcours **ciblé** ; le parcours subscription Show délègue le choix du paiement au **FIFO**.
+
+### Renouvellement : chemin moderne vs `renew()` legacy
+
+**Chemin nominal (modèle crédit multi-mois)** :
+
+- `consumeCreditFromPayment()`, `consumeNextCreditForSubscription()` et **`renewFromPayment()`** (HTTP : renouvellement / consommation **ciblée** sur un paiement) convergent vers **`performCreditConsumption()`** : **un mois** de crédit consommé, **une** ligne `subscription_payment_consumptions`, avance d’**une** période calendaire.
+- `renewFromPayment()` **n’impose pas** que `Payment.amount` égale le tarif courant : l’éligibilité repose sur le **crédit restant** et les règles de statut, pas sur l’égalité montant paiement / `Subscription.amount`.
+
+**Chemin legacy (`SubscriptionService::renew()`)** :
+
+- Conservé pour **compatibilité** et certains tests ; **ne pas** le présenter comme le parcours nominal du modèle crédit actuel.
+- Exige notamment que **`Payment.amount` égale le `Subscription.amount` courant**, que les devises correspondent, et que la période du paiement couvre la période courante de l’abonnement ; avance la période via **`advanceSubscriptionToPeriod`** **sans** le même modèle FIFO / multi-mois que la consommation progressive documentée ci-dessus.
+- Après un **changement de tarif**, un paiement encaissé à l’**ancien** montant mensuel peut **échouer** ce chemin legacy alors que la **consommation de crédit** reste valable sur la base de `monthly_unit_amount` et `credit_months_purchased` **figés**.
 
 ### Subscription `terminated`
 
@@ -341,7 +398,7 @@ Règles :
 1. Plusieurs subscriptions **`terminated`** pour la **même** installation sont **autorisées** (historique de cycles commerciaux clos).
 2. Pour une installation donnée, il ne doit exister **qu’une seule** subscription parmi les statuts **`active`**, **`grace_period`** ou **`suspended`** (ensemble des statuts « non terminés »).
 3. Une **nouvelle** subscription ne peut être **créée** que lorsqu’il **n’existe aucune** subscription non `terminated` pour cette installation (typiquement : après `terminated`, ou première souscription).
-4. Une subscription **`suspended`** reste la **subscription courante** et peut être **renouvelée** selon les règles actuelles (`SubscriptionService::renew` / `renewFromPayment`).
+4. Une subscription **`suspended`** reste la **subscription courante** ; le **renouvellement nominal** passe par la **consommation de crédit** (`renewFromPayment` / FIFO). La méthode legacy **`renew()`** reste disponible pour compatibilité avec des règles plus strictes (voir § Renouvellement : chemin moderne vs `renew()` legacy).
 5. Une subscription **`terminated`** ne peut **plus** être réactivée ni renouvelée (cohérent avec la décision **A**).
 6. Lorsqu’un client **revient** après une subscription `terminated`, une **nouvelle** subscription **peut** être créée (nouveau cycle).
 7. La subscription courante est la subscription **non `terminated`** (unique lorsque la règle est respectée), sélectionnée par `InstallationAccessService` parmi `active` / `grace_period` / `suspended`.
@@ -381,6 +438,7 @@ Les inspections antérieures (ex. Task 36, 24/09/2026) peuvent mentionner des su
 
 | Composant | Fichier |
 |-----------|---------|
+| Défaut tarif à la création | `config/subscriptions.php` (`default_monthly_amount`) |
 | Modèles | `app/Models/Subscription.php`, `app/Models/Payment.php`, `app/Models/SubscriptionPaymentConsumption.php`, `app/Models/Installation.php` |
 | Périodes, lifecycle, crédit, consommation, FIFO | `app/Services/SubscriptionService.php` |
 | Accès calculé | `app/Services/InstallationAccessService.php` |
