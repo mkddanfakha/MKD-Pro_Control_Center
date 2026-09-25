@@ -251,6 +251,12 @@ class PaymentController extends Controller
      */
     public function destroy(Payment $payment): RedirectResponse
     {
+        if ($payment->consumptions()->exists()) {
+            throw ValidationException::withMessages([
+                'payment' => 'Ce paiement ne peut pas être supprimé car son crédit a déjà été consommé.',
+            ]);
+        }
+
         $oldValues = $this->paymentAuditSnapshot($payment);
 
         $payment->delete();
