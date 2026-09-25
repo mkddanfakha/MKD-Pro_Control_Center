@@ -65,6 +65,16 @@ const hasPayments = computed(() => Number(props.credit.payment_count) > 0);
 
 const availableCreditMonths = computed(() => Number(props.credit.available_months ?? 0));
 
+const allRegisteredPaymentsRefunded = computed(() => {
+    const payments = props.credit.payments ?? [];
+
+    if (payments.length === 0) {
+        return false;
+    }
+
+    return payments.every((payment) => payment.is_refunded === true);
+});
+
 function formatCreditMonthsLabel(months) {
     if (months <= 1) {
         return '1 mois';
@@ -201,7 +211,7 @@ const submit = () => {
                                 for="amount"
                                 class="block text-sm font-medium text-gray-700"
                             >
-                                Montant mensuel
+                                Montant mensuel (tarif en vigueur)
                                 <span class="text-red-600" aria-hidden="true">*</span>
                             </label>
 
@@ -258,9 +268,16 @@ const submit = () => {
                                     {{ formatCreditMonthsLabel(availableCreditMonths) }}
                                 </p>
 
-                                <p v-else>
-                                    Aucun crédit consommable disponible actuellement sur cet abonnement.
-                                </p>
+                                <template v-else>
+                                    <p>
+                                        Aucun crédit consommable disponible actuellement sur cet abonnement.
+                                    </p>
+
+                                    <p v-if="allRegisteredPaymentsRefunded">
+                                        Les paiements enregistrés sont remboursés ; ils ne génèrent
+                                        actuellement aucun crédit consommable.
+                                    </p>
+                                </template>
 
                                 <div class="space-y-2 border-t border-gray-200 pt-3 text-xs text-gray-600">
                                     <p>
