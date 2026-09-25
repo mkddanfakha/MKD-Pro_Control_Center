@@ -56,6 +56,8 @@ class PaymentAuditTest extends TestCase
             'amount' => 15000,
             'currency' => 'XOF',
             'status' => Payment::STATUS_PENDING,
+            'monthly_unit_amount' => 15000,
+            'credit_months_purchased' => 1,
             'reference' => 'REF-OLD',
             'notes' => 'Note A',
         ]);
@@ -98,6 +100,8 @@ class PaymentAuditTest extends TestCase
             'currency' => 'XOF',
             'status' => Payment::STATUS_PAID,
             'paid_at' => '2026-10-01 12:00:00',
+            'monthly_unit_amount' => 15000,
+            'credit_months_purchased' => 1,
         ]);
 
         $paymentId = $payment->id;
@@ -132,6 +136,8 @@ class PaymentAuditTest extends TestCase
             'currency' => 'XOF',
             'status' => Payment::STATUS_PAID,
             'paid_at' => '2026-10-01 12:00:00',
+            'monthly_unit_amount' => 15000,
+            'credit_months_purchased' => 1,
             'period_start' => '2026-10-01 00:00:00',
             'period_end' => '2026-10-31 23:59:59',
         ]);
@@ -144,7 +150,8 @@ class PaymentAuditTest extends TestCase
         $payment->refresh();
         $subscription->refresh();
 
-        $this->assertNotNull($payment->renewal_applied_at);
+        $this->assertNull($payment->renewal_applied_at);
+        $this->assertNotNull($payment->credit_exhausted_at);
         $this->assertSame('2026-11-01 00:00:00', $subscription->current_period_start->format('Y-m-d H:i:s'));
 
         $log = AuditLog::query()->where('action', 'payment.renewal_applied')->sole();
@@ -152,7 +159,7 @@ class PaymentAuditTest extends TestCase
         $this->assertSame(Payment::class, $log->auditable_type);
         $this->assertSame($payment->id, $log->auditable_id);
         $this->assertNull($log->old_values['payment']['renewal_applied_at']);
-        $this->assertNotNull($log->new_values['payment']['renewal_applied_at']);
+        $this->assertNull($log->new_values['payment']['renewal_applied_at']);
         $this->assertSame('2026-10-31 23:59:59', $log->old_values['subscription']['current_period_end']);
         $this->assertSame('2026-11-30 23:59:59', $log->new_values['subscription']['current_period_end']);
     }
@@ -183,6 +190,8 @@ class PaymentAuditTest extends TestCase
             'currency' => 'XOF',
             'status' => Payment::STATUS_PAID,
             'paid_at' => '2026-10-01 12:00:00',
+            'monthly_unit_amount' => 15000,
+            'credit_months_purchased' => 1,
             'period_start' => '2026-10-01 00:00:00',
             'period_end' => '2026-10-31 23:59:59',
         ]);
@@ -207,6 +216,8 @@ class PaymentAuditTest extends TestCase
             'currency' => 'XOF',
             'status' => Payment::STATUS_PAID,
             'paid_at' => '2026-10-01 12:00:00',
+            'monthly_unit_amount' => 15000,
+            'credit_months_purchased' => 1,
             'period_start' => '2026-10-01 00:00:00',
             'period_end' => '2026-10-31 23:59:59',
         ]);
@@ -237,6 +248,8 @@ class PaymentAuditTest extends TestCase
             'amount' => 15000,
             'currency' => 'XOF',
             'status' => Payment::STATUS_PENDING,
+            'monthly_unit_amount' => 15000,
+            'credit_months_purchased' => 1,
         ]);
 
         $subscriptionBefore = $subscription->fresh();

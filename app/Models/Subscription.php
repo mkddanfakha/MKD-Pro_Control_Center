@@ -56,6 +56,11 @@ class Subscription extends Model
         return $this->hasMany(Payment::class);
     }
 
+    public function consumptions(): HasMany
+    {
+        return $this->hasMany(SubscriptionPaymentConsumption::class);
+    }
+
     public function isActive(): bool
     {
         return $this->status === self::STATUS_ACTIVE;

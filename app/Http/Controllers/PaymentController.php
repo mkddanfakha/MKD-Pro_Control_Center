@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Exceptions\Subscription\SubscriptionRenewalException;
 use App\Exceptions\Subscription\SubscriptionServiceException;
 use App\Models\Payment;
 use App\Models\Subscription;
@@ -55,7 +56,9 @@ class PaymentController extends Controller
     {
         $validated = $request->validate($this->validationRules());
 
-        $this->assertValidatedPaymentMatchesSubscription($validated);
+        $this->assertValidatedPaymentPeriodFieldsCoherent($validated);
+
+        $validated = array_merge($validated, $this->resolveValidatedPaymentCreditFields($validated));
 
         $payment = Payment::create($validated);
 
@@ -160,14 +163,31 @@ class PaymentController extends Controller
     {
         $validated = $request->validate($this->validationRules());
 
-        if ($payment->hasRenewalBeenApplied() && $validated['status'] !== Payment::STATUS_PAID) {
+        $consumptionCount = $payment->consumptions()->count();
+
+        if ($consumptionCount > 0 && $validated['status'] !== Payment::STATUS_PAID) {
+            throw ValidationException::withMessages([
+                'status' => 'Un paiement dont le crédit a déjà été consommé doit conserver le statut payé.',
+            ]);
+        }
+
+        if ($payment->hasRenewalBeenApplied() && $consumptionCount === 0 && $validated['status'] !== Payment::STATUS_PAID) {
             throw ValidationException::withMessages([
                 'status' => 'Un paiement déjà utilisé pour un renouvellement doit conserver le statut payé.',
             ]);
         }
 
-        $this->assertRenewalAppliedPaymentImmutableFields($payment, $validated);
-        $this->assertValidatedPaymentMatchesSubscription($validated);
+        $this->assertValidatedPaymentPeriodFieldsCoherent($validated);
+
+        if ($consumptionCount > 0) {
+            $this->assertConsumedPaymentImmutableFinancialFields($payment, $validated);
+        } elseif ($payment->hasRenewalBeenApplied()) {
+            $this->assertRenewalAppliedPaymentImmutableFields($payment, $validated);
+        }
+
+        if ($consumptionCount === 0) {
+            $validated = array_merge($validated, $this->resolveValidatedPaymentCreditFields($validated));
+        }
 
         $oldValues = $this->paymentAuditSnapshot($payment);
 
@@ -284,27 +304,78 @@ class PaymentController extends Controller
     }
 
     /**
-     * @return array<string, mixed>
-     */
-    /**
      * @param  array<string, mixed>  $validated
      */
-    private function assertValidatedPaymentMatchesSubscription(array $validated): void
+    private function assertValidatedPaymentPeriodFieldsCoherent(array $validated): void
+    {
+        $start = $validated['period_start'] ?? null;
+        $end = $validated['period_end'] ?? null;
+
+        $startEmpty = $start === null || $start === '';
+        $endEmpty = $end === null || $end === '';
+
+        if ($startEmpty && $endEmpty) {
+            return;
+        }
+
+        if ($startEmpty || $endEmpty) {
+            throw ValidationException::withMessages([
+                'period_start' => 'Les dates de période doivent être renseignées ensemble ou laissées vides.',
+                'period_end' => 'Les dates de période doivent être renseignées ensemble ou laissées vides.',
+            ]);
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $validated
+     * @return array{monthly_unit_amount: int, credit_months_purchased: int}
+     */
+    private function resolveValidatedPaymentCreditFields(array $validated): array
     {
         $subscription = Subscription::query()->find($validated['subscription_id']);
 
         if ($subscription === null) {
-            return;
-        }
-
-        $errors = [];
-
-        if ((int) $validated['amount'] !== (int) $subscription->amount) {
-            $errors['amount'] = 'Le montant doit correspondre exactement au montant de l\'abonnement.';
+            throw ValidationException::withMessages([
+                'subscription_id' => 'Abonnement introuvable.',
+            ]);
         }
 
         if ((string) $validated['currency'] !== (string) $subscription->currency) {
-            $errors['currency'] = 'La devise doit correspondre exactement à la devise de l\'abonnement.';
+            throw ValidationException::withMessages([
+                'currency' => 'La devise doit correspondre exactement à la devise de l\'abonnement.',
+            ]);
+        }
+
+        try {
+            return $this->subscriptionService->calculatePaymentCreditFields(
+                $subscription,
+                (int) $validated['amount'],
+                (string) $validated['currency'],
+            );
+        } catch (SubscriptionRenewalException $exception) {
+            throw ValidationException::withMessages([
+                'amount' => $exception->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $validated
+     */
+    private function assertConsumedPaymentImmutableFinancialFields(Payment $payment, array $validated): void
+    {
+        $errors = [];
+
+        if ((int) $validated['subscription_id'] !== (int) $payment->subscription_id) {
+            $errors['subscription_id'] = 'L\'abonnement ne peut pas être modifié après consommation de crédit.';
+        }
+
+        if ((int) $validated['amount'] !== (int) $payment->amount) {
+            $errors['amount'] = 'Le montant ne peut pas être modifié après consommation de crédit.';
+        }
+
+        if ((string) $validated['currency'] !== (string) $payment->currency) {
+            $errors['currency'] = 'La devise ne peut pas être modifiée après consommation de crédit.';
         }
 
         if ($errors !== []) {
@@ -377,8 +448,10 @@ class PaymentController extends Controller
     {
         return [
             'subscription_id' => 'required|integer|exists:subscriptions,id',
-            'amount' => 'required|integer|min:0',
+            'amount' => 'required|integer|min:1',
             'currency' => 'required|string|size:3',
+            'monthly_unit_amount' => 'prohibited',
+            'credit_months_purchased' => 'prohibited',
             'status' => 'required|in:pending,paid,failed,refunded',
             'due_at' => 'nullable|date',
             'paid_at' => [

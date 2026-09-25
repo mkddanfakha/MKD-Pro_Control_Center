@@ -25,7 +25,10 @@ class PaymentAmountCoherenceTest extends TestCase
         ]));
 
         $response->assertRedirect();
-        $this->assertSame(1, Payment::query()->count());
+
+        $payment = Payment::query()->sole();
+        $this->assertSame(16000, (int) $payment->monthly_unit_amount);
+        $this->assertSame(1, (int) $payment->credit_months_purchased);
     }
 
     public function test_store_rejects_amount_different_from_subscription(): void
@@ -67,7 +70,12 @@ class PaymentAmountCoherenceTest extends TestCase
         ]));
 
         $response->assertRedirect(route('payments.show', $payment));
-        $this->assertSame('REF-UPDATED', $payment->fresh()->reference);
+
+        $payment->refresh();
+
+        $this->assertSame('REF-UPDATED', $payment->reference);
+        $this->assertSame(15000, (int) $payment->monthly_unit_amount);
+        $this->assertSame(1, (int) $payment->credit_months_purchased);
     }
 
     public function test_update_rejects_amount_different_from_subscription(): void
@@ -110,6 +118,8 @@ class PaymentAmountCoherenceTest extends TestCase
             'currency' => 'XOF',
             'status' => Payment::STATUS_PAID,
             'paid_at' => '2026-10-01 12:00:00',
+            'monthly_unit_amount' => 15000,
+            'credit_months_purchased' => 1,
             'renewal_applied_at' => '2026-10-02 12:00:00',
         ]);
 
@@ -133,6 +143,8 @@ class PaymentAmountCoherenceTest extends TestCase
             'currency' => 'XOF',
             'status' => Payment::STATUS_PAID,
             'paid_at' => '2026-10-01 12:00:00',
+            'monthly_unit_amount' => 15000,
+            'credit_months_purchased' => 1,
             'renewal_applied_at' => '2026-10-02 12:00:00',
         ]);
 
@@ -157,6 +169,8 @@ class PaymentAmountCoherenceTest extends TestCase
             'currency' => 'XOF',
             'status' => Payment::STATUS_PAID,
             'paid_at' => '2026-10-01 12:00:00',
+            'monthly_unit_amount' => 15000,
+            'credit_months_purchased' => 1,
             'renewal_applied_at' => '2026-10-02 12:00:00',
         ]);
 
@@ -182,6 +196,8 @@ class PaymentAmountCoherenceTest extends TestCase
             'paid_at' => '2026-10-01 12:00:00',
             'period_start' => '2026-10-01 00:00:00',
             'period_end' => '2026-10-31 23:59:59',
+            'monthly_unit_amount' => 15000,
+            'credit_months_purchased' => 1,
             'renewal_applied_at' => '2026-10-02 12:00:00',
         ]);
 
@@ -216,11 +232,15 @@ class PaymentAmountCoherenceTest extends TestCase
      */
     private function makePayment(Subscription $subscription, array $attributes = []): Payment
     {
+        $amount = (int) ($attributes['amount'] ?? $subscription->amount);
+
         return Payment::query()->create(array_merge([
             'subscription_id' => $subscription->id,
-            'amount' => $subscription->amount,
+            'amount' => $amount,
             'currency' => $subscription->currency,
             'status' => Payment::STATUS_PENDING,
+            'monthly_unit_amount' => (int) $subscription->amount,
+            'credit_months_purchased' => (int) ($amount / (int) $subscription->amount),
         ], $attributes));
     }
 

@@ -236,7 +236,7 @@ class SubscriptionServiceTest extends TestCase
         $this->service->renew($subscription, $payment);
     }
 
-    public function test_can_renew_from_payment_requires_matching_amount_and_currency(): void
+    public function test_can_renew_from_payment_requires_initialized_credit_and_currency(): void
     {
         $subscription = $this->makeSubscription([
             'amount' => 16000,
@@ -262,7 +262,164 @@ class SubscriptionServiceTest extends TestCase
             'paid_at' => '2026-10-15 12:00:00',
         ]);
 
-        $this->assertTrue($this->service->canRenewFromPayment($match));
+        $this->service->applyPaymentCreditFields($match, $subscription);
+
+        $this->assertTrue($this->service->canRenewFromPayment($match->fresh()));
+    }
+
+    public function test_renew_allows_null_payment_period_dates(): void
+    {
+        $subscription = $this->makeSubscription([
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        $payment = Payment::query()->create([
+            'subscription_id' => $subscription->id,
+            'amount' => 15000,
+            'currency' => 'XOF',
+            'status' => Payment::STATUS_PAID,
+            'paid_at' => '2026-10-15 12:00:00',
+        ]);
+
+        $renewed = $this->service->renew($subscription, $payment);
+
+        $this->assertSame('2026-11-01 00:00:00', $renewed->current_period_start->format('Y-m-d H:i:s'));
+    }
+
+    public function test_renew_allows_payment_period_with_matching_days(): void
+    {
+        $subscription = $this->makeSubscription([
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        $payment = Payment::query()->create([
+            'subscription_id' => $subscription->id,
+            'amount' => 15000,
+            'currency' => 'XOF',
+            'status' => Payment::STATUS_PAID,
+            'paid_at' => '2026-10-15 12:00:00',
+            'period_start' => '2026-10-01 06:00:00',
+            'period_end' => '2026-10-31 20:00:00',
+        ]);
+
+        $this->service->renew($subscription, $payment);
+
+        $this->assertSame('2026-11-01 00:00:00', $subscription->fresh()->current_period_start->format('Y-m-d H:i:s'));
+    }
+
+    public function test_renew_rejects_payment_period_with_different_start_day(): void
+    {
+        $subscription = $this->makeSubscription([
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        $payment = Payment::query()->create([
+            'subscription_id' => $subscription->id,
+            'amount' => 15000,
+            'currency' => 'XOF',
+            'status' => Payment::STATUS_PAID,
+            'paid_at' => '2026-10-15 12:00:00',
+            'period_start' => '2026-09-30 00:00:00',
+            'period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        $this->expectException(SubscriptionRenewalException::class);
+        $this->expectExceptionMessage('période du paiement ne correspond pas');
+
+        $this->service->renew($subscription, $payment);
+    }
+
+    public function test_renew_rejects_payment_period_with_different_end_day(): void
+    {
+        $subscription = $this->makeSubscription([
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        $payment = Payment::query()->create([
+            'subscription_id' => $subscription->id,
+            'amount' => 15000,
+            'currency' => 'XOF',
+            'status' => Payment::STATUS_PAID,
+            'paid_at' => '2026-10-15 12:00:00',
+            'period_start' => '2026-10-01 00:00:00',
+            'period_end' => '2026-10-30 23:59:59',
+        ]);
+
+        $this->expectException(SubscriptionRenewalException::class);
+        $this->expectExceptionMessage('période du paiement ne correspond pas');
+
+        $this->service->renew($subscription, $payment);
+    }
+
+    public function test_renew_rejects_payment_with_only_period_start(): void
+    {
+        $subscription = $this->makeSubscription([
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        $payment = Payment::query()->create([
+            'subscription_id' => $subscription->id,
+            'amount' => 15000,
+            'currency' => 'XOF',
+            'status' => Payment::STATUS_PAID,
+            'paid_at' => '2026-10-15 12:00:00',
+            'period_start' => '2026-10-01 00:00:00',
+        ]);
+
+        $this->expectException(SubscriptionRenewalException::class);
+        $this->expectExceptionMessage('incomplètes');
+
+        $this->service->renew($subscription, $payment);
+    }
+
+    public function test_renew_rejects_payment_with_only_period_end(): void
+    {
+        $subscription = $this->makeSubscription([
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        $payment = Payment::query()->create([
+            'subscription_id' => $subscription->id,
+            'amount' => 15000,
+            'currency' => 'XOF',
+            'status' => Payment::STATUS_PAID,
+            'paid_at' => '2026-10-15 12:00:00',
+            'period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        $this->expectException(SubscriptionRenewalException::class);
+        $this->expectExceptionMessage('incomplètes');
+
+        $this->service->renew($subscription, $payment);
+    }
+
+    public function test_renew_rejects_inverted_payment_period_in_database(): void
+    {
+        $subscription = $this->makeSubscription([
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        $payment = Payment::query()->create([
+            'subscription_id' => $subscription->id,
+            'amount' => 15000,
+            'currency' => 'XOF',
+            'status' => Payment::STATUS_PAID,
+            'paid_at' => '2026-10-15 12:00:00',
+            'period_start' => '2026-10-31 00:00:00',
+            'period_end' => '2026-10-01 00:00:00',
+        ]);
+
+        $this->expectException(SubscriptionRenewalException::class);
+        $this->expectExceptionMessage('incohérente');
+
+        $this->service->renew($subscription, $payment);
     }
 
     public function test_renew_resets_grace_period_ends_at(): void

@@ -7,7 +7,10 @@ use App\Exceptions\Subscription\SubscriptionPeriodException;
 use App\Exceptions\Subscription\SubscriptionRenewalException;
 use App\Models\Payment;
 use App\Models\Subscription;
+use App\Models\SubscriptionPaymentConsumption;
 use Carbon\Carbon;
+use Illuminate\Database\QueryException;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 
 class SubscriptionService
@@ -105,12 +108,68 @@ class SubscriptionService
     }
 
     /**
-     * Indique si un paiement payé peut encore être utilisé pour renouveler son abonnement.
+     * Calcule les champs de crédit d'un paiement à partir du montant et de l'abonnement.
+     *
+     * @return array{monthly_unit_amount: int, credit_months_purchased: int}
+     *
+     * @throws SubscriptionRenewalException
      */
-    public function canRenewFromPayment(Payment $payment): bool
+    public function calculatePaymentCreditFields(Subscription $subscription, int $amount, string $currency): array
+    {
+        $monthlyUnitAmount = (int) $subscription->amount;
+
+        if ($monthlyUnitAmount <= 0) {
+            throw new SubscriptionRenewalException('Le tarif mensuel de l\'abonnement est invalide.');
+        }
+
+        if ((string) $currency !== (string) $subscription->currency) {
+            throw new SubscriptionRenewalException('La devise du paiement ne correspond pas à la devise de l\'abonnement.');
+        }
+
+        if ($amount % $monthlyUnitAmount !== 0) {
+            throw new SubscriptionRenewalException('Le montant du paiement doit être un multiple entier du tarif mensuel.');
+        }
+
+        $creditMonthsPurchased = (int) ($amount / $monthlyUnitAmount);
+
+        if ($creditMonthsPurchased < 1) {
+            throw new SubscriptionRenewalException('Le paiement doit financer au moins un mois de crédit.');
+        }
+
+        return [
+            'monthly_unit_amount' => $monthlyUnitAmount,
+            'credit_months_purchased' => $creditMonthsPurchased,
+        ];
+    }
+
+    /**
+     * Renseigne et persiste monthly_unit_amount et credit_months_purchased sur un paiement.
+     *
+     * @throws SubscriptionRenewalException
+     */
+    public function applyPaymentCreditFields(Payment $payment, ?Subscription $subscription = null): Payment
+    {
+        $subscription ??= $this->resolveSubscriptionForPayment($payment);
+
+        $creditFields = $this->calculatePaymentCreditFields(
+            $subscription,
+            (int) $payment->amount,
+            (string) $payment->currency,
+        );
+
+        $payment->fill($creditFields);
+        $payment->save();
+
+        return $payment->fresh();
+    }
+
+    /**
+     * Indique si un paiement payé peut consommer un mois de crédit.
+     */
+    public function canConsumeCreditFromPayment(Payment $payment): bool
     {
         try {
-            $this->assertPaymentEligibleForRenewal($payment);
+            $this->assertPaymentEligibleForCreditConsumption($payment);
 
             return true;
         } catch (SubscriptionRenewalException) {
@@ -119,14 +178,22 @@ class SubscriptionService
     }
 
     /**
-     * Prévisualise la période suivante après renouvellement (sans persister).
+     * Compatibilité : alias historique basé sur le crédit restant.
+     */
+    public function canRenewFromPayment(Payment $payment): bool
+    {
+        return $this->canConsumeCreditFromPayment($payment);
+    }
+
+    /**
+     * Prévisualise la période suivante après consommation d'un mois de crédit (sans persister).
      *
      * @return array{current_period_start: string, current_period_end: string, next_period_start: string, next_period_end: string}
      */
     public function previewRenewalFromPayment(Payment $payment): array
     {
         $subscription = $this->resolveSubscriptionForPayment($payment);
-        $this->assertPaymentEligibleForRenewal($payment);
+        $this->assertPaymentEligibleForCreditConsumption($payment, $subscription);
 
         $nextPeriodStart = Carbon::parse($subscription->current_period_end)->addSecond()->startOfDay();
         $nextPeriod = $this->calculateNextPeriod($subscription, $nextPeriodStart);
@@ -140,36 +207,126 @@ class SubscriptionService
     }
 
     /**
-     * Renouvelle l'abonnement à partir d'un paiement payé (action explicite, idempotente côté paiement).
+     * Consomme le prochain mois de crédit disponible pour l'abonnement (FIFO : paid_at, puis id).
+     *
+     * @throws SubscriptionRenewalException
      */
-    public function renewFromPayment(Payment $payment): Subscription
+    public function consumeNextCreditForSubscription(Subscription $subscription): SubscriptionPaymentConsumption
+    {
+        return DB::transaction(function () use ($subscription) {
+            /** @var Subscription $lockedSubscription */
+            $lockedSubscription = Subscription::query()
+                ->whereKey($subscription->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if ($lockedSubscription->isTerminated()) {
+                throw new SubscriptionRenewalException('Impossible de renouveler un abonnement terminé.');
+            }
+
+            $candidate = $this->findNextFifoEligiblePaymentForSubscription($lockedSubscription);
+
+            if ($candidate === null) {
+                throw new SubscriptionRenewalException('Aucun crédit disponible pour cet abonnement.');
+            }
+
+            /** @var Payment $lockedPayment */
+            $lockedPayment = Payment::query()
+                ->whereKey($candidate->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            return $this->performCreditConsumption($lockedPayment, $lockedSubscription);
+        });
+    }
+
+    /**
+     * Consomme un mois de crédit du paiement et ouvre la période suivante sur l'abonnement.
+     */
+    public function consumeCreditFromPayment(Payment $payment): SubscriptionPaymentConsumption
     {
         return DB::transaction(function () use ($payment) {
+            /** @var Subscription $lockedSubscription */
+            $lockedSubscription = Subscription::query()
+                ->whereKey($payment->subscription_id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
             /** @var Payment $lockedPayment */
             $lockedPayment = Payment::query()
                 ->whereKey($payment->id)
                 ->lockForUpdate()
                 ->firstOrFail();
 
-            /** @var Subscription $subscription */
-            $subscription = Subscription::query()
-                ->whereKey($lockedPayment->subscription_id)
-                ->lockForUpdate()
-                ->firstOrFail();
-
-            $this->assertPaymentEligibleForRenewal($lockedPayment, $subscription);
-
-            $renewedSubscription = $this->renew($subscription, $lockedPayment);
-
-            $lockedPayment->renewal_applied_at = now();
-            $lockedPayment->save();
-
-            return $renewedSubscription;
+            return $this->performCreditConsumption($lockedPayment, $lockedSubscription);
         });
     }
 
     /**
-     * Renouvelle l'abonnement pour la période mensuelle suivante après un paiement valide.
+     * @throws SubscriptionRenewalException
+     */
+    private function performCreditConsumption(Payment $lockedPayment, Subscription $lockedSubscription): SubscriptionPaymentConsumption
+    {
+        $this->assertPaymentEligibleForCreditConsumption($lockedPayment, $lockedSubscription);
+
+        $nextPeriod = $this->calculateNextSubscriptionPeriod($lockedSubscription);
+
+        $this->assertSubscriptionPeriodNotYetConsumed($lockedSubscription, $nextPeriod['start'], $nextPeriod['end']);
+
+        $this->advanceSubscriptionToPeriod($lockedSubscription, $nextPeriod);
+
+        try {
+            $consumption = SubscriptionPaymentConsumption::query()->create([
+                'payment_id' => $lockedPayment->id,
+                'subscription_id' => $lockedSubscription->id,
+                'period_start' => $nextPeriod['start'],
+                'period_end' => $nextPeriod['end'],
+                'consumed_at' => now(),
+            ]);
+        } catch (UniqueConstraintViolationException|QueryException $exception) {
+            if (! $this->isSubscriptionPeriodUniqueViolation($exception)) {
+                throw $exception;
+            }
+
+            throw new SubscriptionRenewalException('Cette période d\'abonnement a déjà été financée.');
+        }
+
+        $this->refreshPaymentCreditExhaustionState($lockedPayment);
+
+        return $consumption->fresh(['payment', 'subscription']);
+    }
+
+    private function findNextFifoEligiblePaymentForSubscription(Subscription $subscription): ?Payment
+    {
+        return Payment::query()
+            ->where('subscription_id', $subscription->id)
+            ->where('status', Payment::STATUS_PAID)
+            ->whereNotNull('paid_at')
+            ->where('currency', $subscription->currency)
+            ->whereNotNull('credit_months_purchased')
+            ->whereNotNull('monthly_unit_amount')
+            ->whereRaw(
+                'credit_months_purchased > (select count(*) from subscription_payment_consumptions as spc where spc.payment_id = payments.id)'
+            )
+            ->orderBy('paid_at')
+            ->orderBy('id')
+            ->first();
+    }
+
+    /**
+     * Compatibilité HTTP/historique : délègue à consumeCreditFromPayment().
+     */
+    public function renewFromPayment(Payment $payment): Subscription
+    {
+        $consumption = $this->consumeCreditFromPayment($payment);
+
+        return $consumption->subscription->fresh();
+    }
+
+    /**
+     * Renouvelle l'abonnement pour la période mensuelle suivante (chemin legacy direct).
+     *
+     * Conservé pour les tests et appels existants exigeant amount === subscription.amount.
      */
     public function renew(Subscription $subscription, ?Payment $payment = null): Subscription
     {
@@ -186,12 +343,37 @@ class SubscriptionService
         }
 
         $this->assertPaymentValidForRenewal($subscription, $payment);
-        $this->assertPaymentAmountAndCurrencyMatchSubscription($subscription, $payment);
+        $this->assertLegacyRenewalAmountAndCurrencyMatchSubscription($subscription, $payment);
         $this->assertPaymentPeriodCoversCurrentSubscriptionPeriod($subscription, $payment);
 
-        $nextPeriodStart = Carbon::parse($subscription->current_period_end)->addSecond()->startOfDay();
-        $period = $this->calculateNextPeriod($subscription, $nextPeriodStart);
+        $nextPeriod = $this->calculateNextSubscriptionPeriod($subscription);
 
+        return $this->advanceSubscriptionToPeriod($subscription, $nextPeriod);
+    }
+
+    /**
+     * @return array{start: Carbon, end: Carbon}
+     */
+    private function calculateNextSubscriptionPeriod(Subscription $subscription): array
+    {
+        if ($subscription->isTerminated()) {
+            throw new SubscriptionRenewalException('Impossible de renouveler un abonnement terminé.');
+        }
+
+        if ($subscription->current_period_end === null) {
+            throw new SubscriptionRenewalException('L\'abonnement ne possède pas de fin de période courante.');
+        }
+
+        $nextPeriodStart = Carbon::parse($subscription->current_period_end)->addSecond()->startOfDay();
+
+        return $this->calculateNextPeriod($subscription, $nextPeriodStart);
+    }
+
+    /**
+     * @param  array{start: Carbon, end: Carbon}  $period
+     */
+    private function advanceSubscriptionToPeriod(Subscription $subscription, array $period): Subscription
+    {
         $subscription->current_period_start = $period['start'];
         $subscription->current_period_end = $period['end'];
         $subscription->grace_period_ends_at = null;
@@ -205,17 +387,114 @@ class SubscriptionService
     /**
      * @throws SubscriptionRenewalException
      */
-    private function assertPaymentEligibleForRenewal(Payment $payment, ?Subscription $subscription = null): void
+    private function assertPaymentEligibleForCreditConsumption(Payment $payment, ?Subscription $subscription = null): void
     {
         $subscription ??= $this->resolveSubscriptionForPayment($payment);
 
-        if ($payment->hasRenewalBeenApplied()) {
-            throw new SubscriptionRenewalException('Ce paiement a déjà été utilisé pour renouveler l\'abonnement.');
+        $this->assertPaymentValidForCreditConsumption($subscription, $payment);
+        $this->assertPaymentCreditCurrencyCoherent($subscription, $payment);
+        $this->assertPaymentHasRemainingCredit($payment);
+    }
+
+    /**
+     * @throws SubscriptionRenewalException
+     */
+    private function assertPaymentValidForCreditConsumption(Subscription $subscription, Payment $payment): void
+    {
+        if ((int) $payment->subscription_id !== (int) $subscription->id) {
+            throw new SubscriptionRenewalException('Le paiement ne correspond pas à cet abonnement.');
         }
 
-        $this->assertPaymentValidForRenewal($subscription, $payment);
-        $this->assertPaymentAmountAndCurrencyMatchSubscription($subscription, $payment);
-        $this->assertPaymentPeriodCoversCurrentSubscriptionPeriod($subscription, $payment);
+        if ($subscription->isTerminated()) {
+            throw new SubscriptionRenewalException('Impossible de renouveler un abonnement terminé.');
+        }
+
+        if ($payment->isRefunded()) {
+            throw new SubscriptionRenewalException('Un paiement remboursé ne peut pas consommer de crédit.');
+        }
+
+        if ($payment->isPending()) {
+            throw new SubscriptionRenewalException('Seul un paiement au statut payé permet la consommation de crédit.');
+        }
+
+        if ($payment->isFailed()) {
+            throw new SubscriptionRenewalException('Seul un paiement au statut payé permet la consommation de crédit.');
+        }
+
+        if (! $payment->isPaid()) {
+            throw new SubscriptionRenewalException('Seul un paiement au statut payé permet la consommation de crédit.');
+        }
+
+        if ($payment->paid_at === null) {
+            throw new SubscriptionRenewalException('Un paiement payé doit posséder une date de paiement.');
+        }
+
+        if ($payment->credit_months_purchased === null || $payment->monthly_unit_amount === null) {
+            throw new SubscriptionRenewalException('Le crédit de ce paiement n\'est pas initialisé.');
+        }
+
+        if ((int) $payment->monthly_unit_amount <= 0) {
+            throw new SubscriptionRenewalException('Le tarif mensuel retenu pour ce paiement est invalide.');
+        }
+    }
+
+    /**
+     * @throws SubscriptionRenewalException
+     */
+    private function assertPaymentCreditCurrencyCoherent(Subscription $subscription, Payment $payment): void
+    {
+        if ((string) $payment->currency !== (string) $subscription->currency) {
+            throw new SubscriptionRenewalException('La devise du paiement ne correspond pas à la devise de l\'abonnement.');
+        }
+    }
+
+    /**
+     * @throws SubscriptionRenewalException
+     */
+    private function assertPaymentHasRemainingCredit(Payment $payment): void
+    {
+        $consumedCount = SubscriptionPaymentConsumption::query()
+            ->where('payment_id', $payment->id)
+            ->count();
+
+        $remaining = (int) $payment->credit_months_purchased - $consumedCount;
+
+        if ($remaining <= 0) {
+            throw new SubscriptionRenewalException('Ce paiement n\'a plus de crédit disponible.');
+        }
+    }
+
+    private function refreshPaymentCreditExhaustionState(Payment $lockedPayment): void
+    {
+        $consumedCount = SubscriptionPaymentConsumption::query()
+            ->where('payment_id', $lockedPayment->id)
+            ->count();
+
+        $remaining = (int) $lockedPayment->credit_months_purchased - $consumedCount;
+
+        if ($remaining <= 0) {
+            $lockedPayment->credit_exhausted_at = now();
+        } else {
+            $lockedPayment->credit_exhausted_at = null;
+        }
+
+        $lockedPayment->save();
+    }
+
+    /**
+     * @throws SubscriptionRenewalException
+     */
+    private function assertSubscriptionPeriodNotYetConsumed(Subscription $subscription, Carbon $periodStart, Carbon $periodEnd): void
+    {
+        $exists = SubscriptionPaymentConsumption::query()
+            ->where('subscription_id', $subscription->id)
+            ->where('period_start', $periodStart->format('Y-m-d H:i:s'))
+            ->where('period_end', $periodEnd->format('Y-m-d H:i:s'))
+            ->exists();
+
+        if ($exists) {
+            throw new SubscriptionRenewalException('Cette période d\'abonnement a déjà été financée.');
+        }
     }
 
     /**
@@ -235,11 +514,7 @@ class SubscriptionService
     }
 
     /**
-     * Le paiement doit couvrir la période courante de l'abonnement.
-     *
-     * Si period_start et period_end sont renseignés sur le paiement, ils doivent correspondre
-     * au calendrier de current_period_start / current_period_end (comparaison au jour près).
-     * Si les dates du paiement sont absentes, la période courante de l'abonnement est implicitement acceptée.
+     * Legacy renew() : période optionnelle sur le paiement.
      *
      * @throws SubscriptionRenewalException
      */
@@ -260,10 +535,15 @@ class SubscriptionService
             throw new SubscriptionRenewalException('Les dates de période du paiement sont incomplètes.');
         }
 
-        $subscriptionStart = Carbon::parse($subscription->current_period_start)->startOfDay();
-        $subscriptionEndDay = Carbon::parse($subscription->current_period_end)->startOfDay();
         $paymentStart = Carbon::parse($paymentPeriodStart)->startOfDay();
         $paymentEndDay = Carbon::parse($paymentPeriodEnd)->startOfDay();
+
+        if ($paymentEndDay->lessThan($paymentStart)) {
+            throw new SubscriptionRenewalException('La période du paiement est incohérente : la date de fin est antérieure à la date de début.');
+        }
+
+        $subscriptionStart = Carbon::parse($subscription->current_period_start)->startOfDay();
+        $subscriptionEndDay = Carbon::parse($subscription->current_period_end)->startOfDay();
 
         if (! $paymentStart->equalTo($subscriptionStart) || ! $paymentEndDay->equalTo($subscriptionEndDay)) {
             throw new SubscriptionRenewalException('La période du paiement ne correspond pas à la période courante de l\'abonnement.');
@@ -285,9 +565,11 @@ class SubscriptionService
     }
 
     /**
+     * Legacy renew() : montant total du paiement = tarif mensuel courant.
+     *
      * @throws SubscriptionRenewalException
      */
-    private function assertPaymentAmountAndCurrencyMatchSubscription(Subscription $subscription, Payment $payment): void
+    private function assertLegacyRenewalAmountAndCurrencyMatchSubscription(Subscription $subscription, Payment $payment): void
     {
         if ((int) $payment->amount !== (int) $subscription->amount) {
             throw new SubscriptionRenewalException('Le montant du paiement ne correspond pas au montant de l\'abonnement.');
@@ -391,5 +673,17 @@ class SubscriptionService
             ->addSecond()
             ->addDays(self::GRACE_PERIOD_DAYS)
             ->subSecond();
+    }
+
+    private function isSubscriptionPeriodUniqueViolation(UniqueConstraintViolationException|QueryException $exception): bool
+    {
+        if ($exception instanceof UniqueConstraintViolationException) {
+            return true;
+        }
+
+        $message = strtolower($exception->getMessage());
+
+        return str_contains($message, 'unique')
+            && str_contains($message, 'subscription_payment_consumptions');
     }
 }

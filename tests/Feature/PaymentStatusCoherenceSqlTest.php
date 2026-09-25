@@ -148,10 +148,14 @@ class PaymentStatusCoherenceSqlTest extends TestCase
      */
     private function createPayment(Subscription $subscription, array $attributes): Payment
     {
+        $amount = (int) ($attributes['amount'] ?? 15000);
+
         return Payment::query()->create(array_merge([
             'subscription_id' => $subscription->id,
-            'amount' => 15000,
+            'amount' => $amount,
             'currency' => 'XOF',
+            'monthly_unit_amount' => (int) $subscription->amount,
+            'credit_months_purchased' => (int) ($amount / (int) $subscription->amount),
         ], $attributes));
     }
 
