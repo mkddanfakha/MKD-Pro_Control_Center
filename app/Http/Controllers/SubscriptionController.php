@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Exceptions\Subscription\SubscriptionServiceException;
 use App\Models\Installation;
+use App\Models\Payment;
 use App\Models\Subscription;
 use App\Services\AuditLogService;
 use App\Services\SubscriptionService;
@@ -212,9 +213,23 @@ class SubscriptionController extends Controller
             ->orderBy('id')
             ->get(['id', 'client_id', 'name', 'subdomain']);
 
+        $credit = $this->subscriptionService->summarizeSubscriptionCreditForDisplay($subscription);
+
+        $hasPendingPayments = false;
+
+        foreach ($credit['payments'] as $paymentRow) {
+            if ($paymentRow['status'] === Payment::STATUS_PENDING) {
+                $hasPendingPayments = true;
+
+                break;
+            }
+        }
+
         return Inertia::render('Subscriptions/Edit', [
             'subscription' => $subscription,
             'installations' => $installations,
+            'credit' => $credit,
+            'hasPendingPayments' => $hasPendingPayments,
         ]);
     }
 

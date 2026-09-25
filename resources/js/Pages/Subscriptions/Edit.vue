@@ -12,6 +12,14 @@ const props = defineProps({
         type: Array,
         required: true,
     },
+    credit: {
+        type: Object,
+        required: true,
+    },
+    hasPendingPayments: {
+        type: Boolean,
+        required: true,
+    },
 });
 
 function toDatetimeLocalValue(value) {
@@ -52,6 +60,18 @@ const installationSubtitle = computed(() => {
 });
 
 const isTerminated = computed(() => props.subscription.status === 'terminated');
+
+const hasPayments = computed(() => Number(props.credit.payment_count) > 0);
+
+const availableCreditMonths = computed(() => Number(props.credit.available_months ?? 0));
+
+function formatCreditMonthsLabel(months) {
+    if (months <= 1) {
+        return '1 mois';
+    }
+
+    return `${months} mois`;
+}
 
 const periodEndRequired = computed(() => form.current_period_start !== '');
 
@@ -206,6 +226,70 @@ const submit = () => {
                                     XOF
                                 </span>
                             </div>
+
+                            <p
+                                id="amount-tariff-help"
+                                class="mt-2 text-xs text-gray-500"
+                            >
+                                Tarif mensuel courant de l'abonnement (montant en vigueur).
+                            </p>
+
+                            <div
+                                v-if="!hasPayments"
+                                class="mt-4 rounded-lg border border-gray-200 bg-gray-50/80 p-4 text-sm text-gray-600"
+                            >
+                                Aucun paiement n'est encore enregistré pour cet abonnement.
+                            </div>
+
+                            <div
+                                v-else
+                                class="mt-4 space-y-3 rounded-lg border border-gray-200 bg-gray-50/80 p-4 text-sm text-gray-600"
+                            >
+                                <p class="text-gray-900">
+                                    Paiements enregistrés :
+                                    <span class="font-medium">{{ credit.payment_count }}</span>
+                                </p>
+
+                                <p
+                                    v-if="availableCreditMonths > 0"
+                                    class="font-medium text-gray-900"
+                                >
+                                    Crédit disponible :
+                                    {{ formatCreditMonthsLabel(availableCreditMonths) }}
+                                </p>
+
+                                <p v-else>
+                                    Aucun crédit consommable disponible actuellement sur cet abonnement.
+                                </p>
+
+                                <div class="space-y-2 border-t border-gray-200 pt-3 text-xs text-gray-600">
+                                    <p>
+                                        Ce montant correspond au tarif mensuel actuel de l'abonnement.
+                                    </p>
+                                    <p>
+                                        Modifier ce tarif ne modifie pas les paiements ni les crédits déjà enregistrés.
+                                        Les nouveaux paiements utiliseront le nouveau tarif.
+                                    </p>
+                                    <p v-if="availableCreditMonths > 0">
+                                        Le crédit déjà acheté conserve son tarif de référence.
+                                    </p>
+                                </div>
+
+                                <p
+                                    v-if="hasPendingPayments"
+                                    class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+                                >
+                                    Un paiement en attente existe sur cet abonnement. Sa validation ultérieure sera
+                                    soumise au tarif mensuel en vigueur au moment de sa modification.
+                                </p>
+                            </div>
+
+                            <p
+                                v-if="isTerminated"
+                                class="mt-4 text-xs text-gray-500"
+                            >
+                                Cet abonnement est terminé. La modification du tarif ne réactive pas l'abonnement.
+                            </p>
 
                             <p
                                 v-if="form.errors.amount"

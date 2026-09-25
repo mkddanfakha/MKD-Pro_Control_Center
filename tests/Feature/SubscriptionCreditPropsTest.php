@@ -234,6 +234,86 @@ class SubscriptionCreditPropsTest extends TestCase
                 ->where('credit.payments.0.credit_months_remaining', 3));
     }
 
+    public function test_edit_exposes_zero_payments_and_no_pending(): void
+    {
+        $user = User::factory()->create();
+        $subscription = $this->makeSubscription(['amount' => 18000]);
+
+        $this->actingAs($user)
+            ->get(route('subscriptions.edit', $subscription))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Subscriptions/Edit')
+                ->where('subscription.amount', 18000)
+                ->where('credit.payment_count', 0)
+                ->where('credit.available_months', 0)
+                ->where('hasPendingPayments', false));
+    }
+
+    public function test_edit_exposes_payment_count_when_payments_exist(): void
+    {
+        $user = User::factory()->create();
+        $subscription = $this->makeSubscription();
+        $this->makePaidPayment($subscription, 15000, 1);
+
+        $this->actingAs($user)
+            ->get(route('subscriptions.edit', $subscription))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Subscriptions/Edit')
+                ->where('credit.payment_count', 1)
+                ->where('hasPendingPayments', false));
+    }
+
+    public function test_edit_exposes_available_credit_months(): void
+    {
+        $user = User::factory()->create();
+        $subscription = $this->makeSubscription();
+        $this->makePaidPayment($subscription, 45000, 3);
+
+        $this->actingAs($user)
+            ->get(route('subscriptions.edit', $subscription))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('credit.available_months', 3)
+                ->where('credit.payment_count', 1));
+    }
+
+    public function test_edit_exposes_has_pending_payments_when_pending_exists(): void
+    {
+        $user = User::factory()->create();
+        $subscription = $this->makeSubscription();
+
+        Payment::query()->create([
+            'subscription_id' => $subscription->id,
+            'amount' => 15000,
+            'currency' => 'XOF',
+            'status' => Payment::STATUS_PENDING,
+            'monthly_unit_amount' => 15000,
+            'credit_months_purchased' => 1,
+        ]);
+
+        $this->actingAs($user)
+            ->get(route('subscriptions.edit', $subscription))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('hasPendingPayments', true)
+                ->where('credit.payment_count', 1));
+    }
+
+    public function test_edit_has_pending_payments_false_when_only_paid_payments_exist(): void
+    {
+        $user = User::factory()->create();
+        $subscription = $this->makeSubscription();
+        $this->makePaidPayment($subscription, 15000, 1);
+
+        $this->actingAs($user)
+            ->get(route('subscriptions.edit', $subscription))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('hasPendingPayments', false));
+    }
+
     /**
      * @param  array<string, mixed>  $attributes
      */
