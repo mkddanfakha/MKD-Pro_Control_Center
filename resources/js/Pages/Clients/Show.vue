@@ -104,19 +104,15 @@ function accessPrimaryLabel(access) {
 
 function accessDetailLabel(access) {
     if (!access) {
-        return 'Aucun abonnement';
+        return 'Aucun abonnement courant';
     }
 
     if (access.status === 'suspended') {
         return 'Abonnement suspendu';
     }
 
-    if (access.status === 'terminated') {
-        return 'Abonnement terminé';
-    }
-
-    if (access.status === 'no_subscription') {
-        return 'Aucun abonnement';
+    if (access.status === 'no_subscription' || access.status === 'terminated') {
+        return 'Aucun abonnement courant';
     }
 
     if (access.subscription_status === 'grace_period') {
@@ -127,7 +123,7 @@ function accessDetailLabel(access) {
         return 'Abonnement actif';
     }
 
-    return '—';
+    return null;
 }
 
 function accessBadgeClass(access) {
