@@ -3,14 +3,23 @@
 namespace App\Http\Controllers;
 
 use App\Models\Client;
+use App\Models\Installation;
+use App\Models\Payment;
+use App\Models\Subscription;
 use App\Services\AuditLogService;
+use App\Services\InstallationAccessService;
+use App\Services\SubscriptionService;
+use DateTimeInterface;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Inertia\Inertia;
 
 class ClientController extends Controller
 {
     public function __construct(
         private readonly AuditLogService $auditLogService,
+        private readonly InstallationAccessService $installationAccessService,
+        private readonly SubscriptionService $subscriptionService,
     ) {}
 
     /**
@@ -71,13 +80,50 @@ class ClientController extends Controller
     public function show(Client $client)
     {
         $client->load([
-            'installations' => function ($query) {
-                $query->orderByDesc('id');
-            },
+            'installations' => fn ($query) => $query->orderByDesc('id'),
         ]);
 
+        $installationIds = $client->installations->pluck('id');
+
+        if ($installationIds->isNotEmpty()) {
+            $subscriptionsByInstallation = Subscription::query()
+                ->whereIn('installation_id', $installationIds)
+                ->orderByDesc('id')
+                ->get()
+                ->groupBy('installation_id');
+
+            $client->installations->each(function (Installation $installation) use ($subscriptionsByInstallation): void {
+                $installation->setRelation(
+                    'subscriptions',
+                    $subscriptionsByInstallation->get($installation->id, collect()),
+                );
+            });
+        }
+
+        $installationOverviews = $client->installations
+            ->map(fn (Installation $installation) => $this->installationEcosystemOverview($installation))
+            ->values()
+            ->all();
+
+        $ecosystemSummary = $this->clientEcosystemSummary($installationIds, $installationOverviews);
+
         return Inertia::render('Clients/Show', [
-            'client' => $client,
+            'client' => $client->only([
+                'id',
+                'company_name',
+                'contact_name',
+                'phone',
+                'email',
+                'address',
+                'city',
+                'country',
+                'status',
+                'notes',
+                'created_at',
+                'updated_at',
+            ]),
+            'installationOverviews' => $installationOverviews,
+            'ecosystemSummary' => $ecosystemSummary,
         ]);
     }
 
@@ -141,6 +187,134 @@ class ClientController extends Controller
         return redirect()
             ->route('clients.index')
             ->with('success', 'Client supprimé avec succès.');
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function installationEcosystemOverview(Installation $installation): array
+    {
+        $access = $this->installationAccessService->accessSummary($installation);
+        $currentSubscription = $this->installationAccessService->latestSubscription($installation);
+
+        $displaySubscription = $currentSubscription;
+
+        if ($displaySubscription === null) {
+            $displaySubscription = $installation->subscriptions
+                ->where('status', Subscription::STATUS_TERMINATED)
+                ->sortByDesc('id')
+                ->first();
+        }
+
+        $subscriptionPayload = $displaySubscription !== null
+            ? $this->serializeSubscriptionOverview($displaySubscription, $currentSubscription !== null)
+            : null;
+
+        $creditPayload = null;
+
+        if ($currentSubscription !== null) {
+            $creditSummary = $this->subscriptionService->summarizeSubscriptionCreditForDisplay($currentSubscription);
+            $creditPayload = [
+                'available_months' => (int) $creditSummary['available_months'],
+                'payment_count' => (int) $creditSummary['payment_count'],
+            ];
+        } elseif ($displaySubscription !== null && $displaySubscription->isTerminated()) {
+            $creditSummary = $this->subscriptionService->summarizeSubscriptionCreditForDisplay($displaySubscription);
+            $creditPayload = [
+                'available_months' => 0,
+                'payment_count' => (int) $creditSummary['payment_count'],
+            ];
+        }
+
+        return [
+            'installation' => [
+                'id' => $installation->id,
+                'name' => $installation->name,
+                'subdomain' => $installation->subdomain,
+                'domain' => $installation->domain,
+                'status' => $installation->status,
+            ],
+            'access' => $access,
+            'subscription' => $subscriptionPayload,
+            'credit' => $creditPayload,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function serializeSubscriptionOverview(Subscription $subscription, bool $isCurrentNonTerminated): array
+    {
+        return [
+            'id' => $subscription->id,
+            'status' => $subscription->status,
+            'amount' => (int) $subscription->amount,
+            'currency' => (string) $subscription->currency,
+            'current_period_start' => $this->formatDateTimeAttribute($subscription->current_period_start),
+            'current_period_end' => $this->formatDateTimeAttribute($subscription->current_period_end),
+            'is_current_non_terminated' => $isCurrentNonTerminated,
+        ];
+    }
+
+    /**
+     * @param  Collection<int, int|string>  $installationIds
+     * @param  list<array<string, mixed>>  $installationOverviews
+     * @return array<string, mixed>
+     */
+    private function clientEcosystemSummary(Collection $installationIds, array $installationOverviews): array
+    {
+        $totalAvailableCreditMonths = collect($installationOverviews)
+            ->sum(fn (array $overview) => (int) ($overview['credit']['available_months'] ?? 0));
+
+        if ($installationIds->isEmpty()) {
+            return [
+                'payments_count' => 0,
+                'last_payment' => null,
+                'total_available_credit_months' => 0,
+            ];
+        }
+
+        $subscriptionIds = Subscription::query()
+            ->whereIn('installation_id', $installationIds)
+            ->pluck('id');
+
+        if ($subscriptionIds->isEmpty()) {
+            return [
+                'payments_count' => 0,
+                'last_payment' => null,
+                'total_available_credit_months' => $totalAvailableCreditMonths,
+            ];
+        }
+
+        $paymentsCount = Payment::query()
+            ->whereIn('subscription_id', $subscriptionIds)
+            ->count();
+
+        $lastPayment = Payment::query()
+            ->whereIn('subscription_id', $subscriptionIds)
+            ->orderByDesc('paid_at')
+            ->orderByDesc('id')
+            ->first();
+
+        return [
+            'payments_count' => $paymentsCount,
+            'last_payment' => $lastPayment !== null ? [
+                'id' => $lastPayment->id,
+                'amount' => (int) $lastPayment->amount,
+                'currency' => (string) $lastPayment->currency,
+                'paid_at' => $this->formatDateTimeAttribute($lastPayment->paid_at),
+            ] : null,
+            'total_available_credit_months' => $totalAvailableCreditMonths,
+        ];
+    }
+
+    private function formatDateTimeAttribute(mixed $value): ?string
+    {
+        if ($value instanceof DateTimeInterface) {
+            return $value->format('Y-m-d H:i:s');
+        }
+
+        return null;
     }
 
     /**

@@ -1,18 +1,23 @@
 <script setup>
 import AdminLayout from '@/Layouts/AdminLayout.vue';
 import { Head, Link, usePage } from '@inertiajs/vue3';
-import { computed } from 'vue';
 
 const props = defineProps({
     client: {
         type: Object,
         required: true,
     },
+    installationOverviews: {
+        type: Array,
+        default: () => [],
+    },
+    ecosystemSummary: {
+        type: Object,
+        required: true,
+    },
 });
 
 const page = usePage();
-
-const clientInstallations = computed(() => props.client.installations ?? []);
 
 function displayValue(value) {
     return value && String(value).trim() !== '' ? value : '—';
@@ -53,6 +58,131 @@ function formatDateTime(value) {
         dateStyle: 'medium',
         timeStyle: 'short',
     }).format(new Date(value));
+}
+
+function formatAmount(amount, currency) {
+    if (amount === null || amount === undefined || amount === '') {
+        return '—';
+    }
+
+    const formatted = new Intl.NumberFormat('fr-FR', {
+        maximumFractionDigits: 0,
+    }).format(Number(amount));
+
+    return `${formatted} ${currency ?? 'XOF'}`;
+}
+
+function subscriptionStatusLabel(status) {
+    const labels = {
+        active: 'Actif',
+        grace_period: 'Période de grâce',
+        suspended: 'Suspendu',
+        terminated: 'Terminé',
+    };
+
+    return labels[status] ?? status;
+}
+
+function subscriptionStatusBadgeClass(status) {
+    const classes = {
+        active: 'bg-sky-50 text-sky-800 ring-sky-200',
+        grace_period: 'bg-amber-50 text-amber-900 ring-amber-200',
+        suspended: 'bg-orange-50 text-orange-900 ring-orange-200',
+        terminated: 'bg-gray-100 text-gray-700 ring-gray-300',
+    };
+
+    return classes[status] ?? 'bg-gray-100 text-gray-600 ring-gray-200';
+}
+
+function accessPrimaryLabel(access) {
+    if (!access?.accessible) {
+        return 'Accès non autorisé';
+    }
+
+    return 'Accès autorisé';
+}
+
+function accessDetailLabel(access) {
+    if (!access) {
+        return 'Aucun abonnement';
+    }
+
+    if (access.status === 'suspended') {
+        return 'Abonnement suspendu';
+    }
+
+    if (access.status === 'terminated') {
+        return 'Abonnement terminé';
+    }
+
+    if (access.status === 'no_subscription') {
+        return 'Aucun abonnement';
+    }
+
+    if (access.subscription_status === 'grace_period') {
+        return 'Période de grâce';
+    }
+
+    if (access.subscription_status === 'active') {
+        return 'Abonnement actif';
+    }
+
+    return '—';
+}
+
+function accessBadgeClass(access) {
+    if (access?.accessible) {
+        return 'border-emerald-200 bg-emerald-50 text-emerald-900';
+    }
+
+    return 'border-amber-200 bg-amber-50 text-amber-950';
+}
+
+function formatPeriodRange(start, end) {
+    const startLabel = formatDateOnly(start);
+    const endLabel = formatDateOnly(end);
+
+    if (startLabel === '—' && endLabel === '—') {
+        return '—';
+    }
+
+    return `${startLabel} → ${endLabel}`;
+}
+
+function formatDateOnly(value) {
+    if (!value || String(value).trim() === '') {
+        return '—';
+    }
+
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) {
+        return '—';
+    }
+
+    return new Intl.DateTimeFormat('fr-FR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+    }).format(date);
+}
+
+function creditMonthsLabel(months) {
+    const value = Number(months);
+
+    if (Number.isNaN(value)) {
+        return '—';
+    }
+
+    if (value === 0) {
+        return '0 mois disponible';
+    }
+
+    if (value === 1) {
+        return '1 mois disponible';
+    }
+
+    return `${value} mois disponibles`;
 }
 
 function formatDate(value) {
@@ -258,9 +388,15 @@ function formatDate(value) {
 
                 <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">
                     <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                        <h2 class="text-lg font-semibold text-gray-900">
-                            Installations
-                        </h2>
+                        <div>
+                            <h2 class="text-lg font-semibold text-gray-900">
+                                Écosystème MKD-Pro
+                            </h2>
+
+                            <p class="mt-1 text-sm text-gray-500">
+                                Installations, abonnements, accès et crédit pour ce client.
+                            </p>
+                        </div>
 
                         <Link
                             href="/installations/create"
@@ -271,147 +407,199 @@ function formatDate(value) {
                     </div>
 
                     <div
-                        v-if="!clientInstallations.length"
+                        v-if="!installationOverviews.length"
                         class="mt-6 rounded-lg border border-dashed border-gray-300 bg-gray-50/80 px-6 py-10 text-center"
                     >
                         <h3 class="text-base font-semibold text-gray-900">
-                            Aucune installation
+                            Aucune installation MKD-Pro pour ce client.
                         </h3>
 
                         <p class="mx-auto mt-2 max-w-md text-sm text-gray-500">
-                            Ce client n'a encore aucune installation MKD-Pro.
+                            Créez une installation pour commencer à gérer l’abonnement et les paiements.
                         </p>
                     </div>
 
                     <div
                         v-else
-                        class="mt-6 overflow-hidden rounded-xl ring-1 ring-gray-200"
+                        class="mt-6 space-y-6"
                     >
-                        <div class="overflow-x-auto">
-                            <table class="min-w-full divide-y divide-gray-200 text-left text-sm">
-                                <thead class="bg-gray-50">
-                                    <tr>
-                                        <th
-                                            scope="col"
-                                            class="px-4 py-3 font-semibold text-gray-700 sm:px-6"
+                        <article
+                            v-for="overview in installationOverviews"
+                            :key="overview.installation.id"
+                            class="rounded-xl border border-gray-200 bg-gray-50/50 p-5 sm:p-6"
+                        >
+                            <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                                <div>
+                                    <h3 class="text-base font-semibold text-gray-900">
+                                        {{ overview.installation.name }}
+                                    </h3>
+
+                                    <p class="mt-1 text-sm text-gray-500">
+                                        {{ client.company_name }}
+                                    </p>
+                                </div>
+
+                                <Link
+                                    :href="`/installations/${overview.installation.id}`"
+                                    class="inline-flex shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2"
+                                >
+                                    Voir l’installation
+                                </Link>
+                            </div>
+
+                            <dl class="mt-6 grid gap-4 sm:grid-cols-2">
+                                <div>
+                                    <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                        Sous-domaine
+                                    </dt>
+                                    <dd class="mt-1 text-sm text-gray-900">
+                                        {{ displayValue(overview.installation.subdomain) }}
+                                    </dd>
+                                </div>
+
+                                <div>
+                                    <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                        Installation
+                                    </dt>
+                                    <dd class="mt-1">
+                                        <span
+                                            class="inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset"
+                                            :class="installationStatusBadgeClass(overview.installation.status)"
                                         >
-                                            Installation
-                                        </th>
-                                        <th
-                                            scope="col"
-                                            class="hidden px-4 py-3 font-semibold text-gray-700 md:table-cell sm:px-6"
+                                            {{ installationStatusLabel(overview.installation.status) }}
+                                        </span>
+                                    </dd>
+                                </div>
+
+                                <div>
+                                    <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                        Accès
+                                    </dt>
+                                    <dd class="mt-1">
+                                        <span
+                                            class="inline-flex rounded-full border px-2.5 py-0.5 text-xs font-medium"
+                                            :class="accessBadgeClass(overview.access)"
                                         >
-                                            Sous-domaine
-                                        </th>
-                                        <th
-                                            scope="col"
-                                            class="hidden px-4 py-3 font-semibold text-gray-700 lg:table-cell sm:px-6"
-                                        >
-                                            Domaine
-                                        </th>
-                                        <th
-                                            scope="col"
-                                            class="hidden px-4 py-3 font-semibold text-gray-700 sm:table-cell sm:px-6"
-                                        >
-                                            Version
-                                        </th>
-                                        <th
-                                            scope="col"
-                                            class="px-4 py-3 font-semibold text-gray-700 sm:px-6"
-                                        >
-                                            Statut installation
-                                        </th>
-                                        <th
-                                            scope="col"
-                                            class="hidden px-4 py-3 font-semibold text-gray-700 md:table-cell sm:px-6"
-                                        >
-                                            Dernière présence enregistrée
-                                        </th>
-                                        <th
-                                            scope="col"
-                                            class="px-4 py-3 font-semibold text-gray-700 sm:px-6"
-                                        >
-                                            Actions
-                                        </th>
-                                    </tr>
-                                </thead>
-                                <tbody class="divide-y divide-gray-200 bg-white">
-                                    <tr
-                                        v-for="installation in clientInstallations"
-                                        :key="installation.id"
-                                    >
-                                        <td class="whitespace-nowrap px-4 py-4 font-medium text-gray-900 sm:px-6">
-                                            {{ installation.name }}
-                                        </td>
-                                        <td class="hidden whitespace-nowrap px-4 py-4 text-gray-600 md:table-cell sm:px-6">
-                                            {{ installation.subdomain }}
-                                        </td>
-                                        <td class="hidden whitespace-nowrap px-4 py-4 text-gray-600 lg:table-cell sm:px-6">
-                                            {{ displayValue(installation.domain) }}
-                                        </td>
-                                        <td class="hidden whitespace-nowrap px-4 py-4 text-gray-600 sm:table-cell sm:px-6">
-                                            {{ displayValue(installation.version) }}
-                                        </td>
-                                        <td class="whitespace-nowrap px-4 py-4 sm:px-6">
+                                            {{ accessPrimaryLabel(overview.access) }}
+                                        </span>
+                                        <p class="mt-1 text-sm text-gray-600">
+                                            {{ accessDetailLabel(overview.access) }}
+                                        </p>
+                                    </dd>
+                                </div>
+
+                                <div>
+                                    <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                        Abonnement
+                                    </dt>
+                                    <dd class="mt-1">
+                                        <template v-if="overview.subscription">
                                             <span
                                                 class="inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset"
-                                                :class="installationStatusBadgeClass(installation.status)"
+                                                :class="subscriptionStatusBadgeClass(overview.subscription.status)"
                                             >
-                                                {{ installationStatusLabel(installation.status) }}
+                                                {{ subscriptionStatusLabel(overview.subscription.status) }}
                                             </span>
-                                        </td>
-                                        <td class="hidden whitespace-nowrap px-4 py-4 text-gray-600 md:table-cell sm:px-6">
-                                            {{ formatDate(installation.last_seen_at) }}
-                                        </td>
-                                        <td class="px-4 py-4 sm:px-6">
-                                            <div class="flex flex-wrap items-center gap-x-3 gap-y-2">
-                                                <Link
-                                                    :href="`/installations/${installation.id}`"
-                                                    class="text-sm font-medium text-gray-700 underline-offset-2 hover:text-gray-900 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2"
-                                                >
-                                                    Voir
-                                                </Link>
-                                                <Link
-                                                    :href="`/installations/${installation.id}/edit`"
-                                                    class="text-sm font-medium text-gray-700 underline-offset-2 hover:text-gray-900 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2"
-                                                >
-                                                    Modifier
-                                                </Link>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
+                                            <p class="mt-2 text-sm font-medium text-gray-900">
+                                                {{ formatAmount(overview.subscription.amount, overview.subscription.currency) }}/mois
+                                            </p>
+                                            <Link
+                                                v-if="overview.subscription.id"
+                                                :href="`/subscriptions/${overview.subscription.id}`"
+                                                class="mt-2 inline-block text-sm font-medium text-gray-700 underline-offset-2 hover:text-gray-900 hover:underline"
+                                            >
+                                                Voir l’abonnement
+                                            </Link>
+                                        </template>
+                                        <p
+                                            v-else
+                                            class="text-sm text-gray-600"
+                                        >
+                                            Aucun abonnement
+                                        </p>
+                                    </dd>
+                                </div>
+
+                                <div
+                                    v-if="overview.subscription?.current_period_start || overview.subscription?.current_period_end"
+                                    class="sm:col-span-2"
+                                >
+                                    <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                        Période
+                                    </dt>
+                                    <dd class="mt-1 text-sm text-gray-900">
+                                        {{ formatPeriodRange(overview.subscription.current_period_start, overview.subscription.current_period_end) }}
+                                    </dd>
+                                </div>
+
+                                <div v-if="overview.credit">
+                                    <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                        Crédit disponible
+                                    </dt>
+                                    <dd class="mt-1 text-sm font-medium text-gray-900">
+                                        {{ creditMonthsLabel(overview.credit.available_months) }}
+                                    </dd>
+                                </div>
+
+                                <div v-if="overview.credit">
+                                    <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                        Paiements (abonnement)
+                                    </dt>
+                                    <dd class="mt-1 text-sm text-gray-900">
+                                        {{ overview.credit.payment_count }}
+                                    </dd>
+                                </div>
+                            </dl>
+                        </article>
                     </div>
-                </section>
 
-                <section class="rounded-xl border border-dashed border-gray-300 bg-gray-50/80 p-6 sm:p-8">
-                    <h2 class="text-lg font-semibold text-gray-900">
-                        Écosystème MKD-Pro
-                    </h2>
+                    <div class="mt-8 rounded-xl border border-gray-200 bg-white p-5 sm:p-6">
+                        <h3 class="text-sm font-semibold text-gray-900">
+                            Paiements du client
+                        </h3>
 
-                    <p class="mt-1 text-sm text-gray-500">
-                        Modules liés à ce client — contenu à venir.
-                    </p>
+                        <dl class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                            <div>
+                                <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                    Paiements
+                                </dt>
+                                <dd class="mt-1 text-sm font-medium text-gray-900">
+                                    {{ ecosystemSummary.payments_count }}
+                                </dd>
+                            </div>
 
-                    <div class="mt-6 grid gap-4 sm:grid-cols-2">
-                        <div class="rounded-lg bg-white p-5 shadow-sm ring-1 ring-gray-200">
-                            <h3 class="text-sm font-semibold text-gray-900">
-                                Abonnement
-                            </h3>
-                            <p class="mt-2 text-sm text-gray-500">
-                                L'abonnement de ce client sera affiché ici.
-                            </p>
-                        </div>
+                            <div>
+                                <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                    Dernier paiement
+                                </dt>
+                                <dd class="mt-1 text-sm text-gray-900">
+                                    <template v-if="ecosystemSummary.last_payment">
+                                        {{ formatAmount(ecosystemSummary.last_payment.amount, ecosystemSummary.last_payment.currency) }}
+                                        — {{ formatDateOnly(ecosystemSummary.last_payment.paid_at) }}
+                                    </template>
+                                    <template v-else>
+                                        —
+                                    </template>
+                                </dd>
+                            </div>
 
-                        <div class="rounded-lg bg-white p-5 shadow-sm ring-1 ring-gray-200">
-                            <h3 class="text-sm font-semibold text-gray-900">
-                                Paiements
-                            </h3>
-                            <p class="mt-2 text-sm text-gray-500">
-                                L'historique des paiements sera affiché ici.
-                            </p>
+                            <div>
+                                <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                    Crédit disponible (total)
+                                </dt>
+                                <dd class="mt-1 text-sm font-medium text-gray-900">
+                                    {{ creditMonthsLabel(ecosystemSummary.total_available_credit_months) }}
+                                </dd>
+                            </div>
+                        </dl>
+
+                        <div class="mt-4">
+                            <Link
+                                href="/payments"
+                                class="text-sm font-medium text-gray-700 underline-offset-2 hover:text-gray-900 hover:underline"
+                            >
+                                Voir tous les paiements
+                            </Link>
                         </div>
                     </div>
                 </section>

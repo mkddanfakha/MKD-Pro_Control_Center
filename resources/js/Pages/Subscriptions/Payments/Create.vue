@@ -54,6 +54,90 @@ const selectedSubscription = computed(() =>
     props.subscriptions.find((subscription) => String(subscription.id) === String(form.subscription_id)) ?? null,
 );
 
+function parsePositiveIntegerAmount(value) {
+    if (value === '' || value === null || value === undefined) {
+        return null;
+    }
+
+    const numeric = Number(value);
+
+    if (!Number.isFinite(numeric) || numeric <= 0 || !Number.isInteger(numeric)) {
+        return null;
+    }
+
+    return numeric;
+}
+
+const amountCreditPreview = computed(() => {
+    if (!selectedSubscription.value) {
+        return null;
+    }
+
+    const monthlyAmount = parsePositiveIntegerAmount(selectedSubscription.value.amount);
+
+    if (monthlyAmount === null) {
+        return null;
+    }
+
+    const paymentAmount = parsePositiveIntegerAmount(form.amount);
+
+    if (paymentAmount === null) {
+        return null;
+    }
+
+    if (paymentAmount % monthlyAmount !== 0) {
+        return { type: 'indivisible' };
+    }
+
+    const months = paymentAmount / monthlyAmount;
+    const currency = form.currency || selectedSubscription.value.currency || 'XOF';
+
+    return {
+        type: 'match',
+        formattedAmount: formatFcfaAmount(paymentAmount),
+        formattedMonthly: formatFcfaAmount(monthlyAmount),
+        currency,
+        months,
+        monthsLabel: formatCreditMonthsLabel(months),
+    };
+});
+
+const amountFieldDescribedBy = computed(() => {
+    const ids = [];
+
+    if (selectedSubscription.value) {
+        ids.push('amount-expected-help');
+    }
+
+    if (amountCreditPreview.value?.type === 'match') {
+        ids.push('amount-credit-preview');
+    }
+
+    if (amountCreditPreview.value?.type === 'indivisible') {
+        ids.push('amount-credit-indivisible');
+    }
+
+    if (form.errors.amount) {
+        ids.push('amount-error');
+    }
+
+    return ids.length > 0 ? ids.join(' ') : undefined;
+});
+
+function formatFcfaAmount(value) {
+    return new Intl.NumberFormat('fr-FR', {
+        maximumFractionDigits: 0,
+    }).format(value);
+}
+
+function formatCreditMonthsLabel(months) {
+    if (months <= 1) {
+        return '1 mois de crédit';
+    }
+
+    return `${months} mois de crédit`;
+}
+
 watch(
     () => form.subscription_id,
     (subscriptionId) => {
@@ -210,13 +294,36 @@ const submit = () => {
                                     class="block w-full rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none transition focus:border-gray-900 focus:ring-2 focus:ring-gray-200"
                                     :disabled="form.processing"
                                     :aria-invalid="!!form.errors.amount"
-                                    :aria-describedby="form.errors.amount ? 'amount-error' : undefined"
+                                    :aria-describedby="amountFieldDescribedBy"
                                 />
 
                                 <span class="shrink-0 text-sm font-medium text-gray-600">
                                     XOF
                                 </span>
                             </div>
+
+                            <div
+                                v-if="amountCreditPreview?.type === 'match'"
+                                id="amount-credit-preview"
+                                class="mt-3 rounded-lg border border-sky-100 bg-sky-50/90 px-4 py-3 text-sm text-sky-950"
+                                role="status"
+                            >
+                                <p class="font-medium text-sky-950">
+                                    {{ amountCreditPreview.formattedAmount }} {{ amountCreditPreview.currency }} = {{ amountCreditPreview.monthsLabel }}
+                                </p>
+                                <p class="mt-1 text-sky-900">
+                                    Tarif mensuel : {{ amountCreditPreview.formattedMonthly }} {{ amountCreditPreview.currency }}/mois
+                                </p>
+                            </div>
+
+                            <p
+                                v-else-if="amountCreditPreview?.type === 'indivisible'"
+                                id="amount-credit-indivisible"
+                                class="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950"
+                                role="status"
+                            >
+                                Le montant doit correspondre à un nombre entier de mois de crédit.
+                            </p>
 
                             <p
                                 v-if="form.errors.amount"

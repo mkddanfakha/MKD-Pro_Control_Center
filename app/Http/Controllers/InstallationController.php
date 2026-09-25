@@ -4,9 +4,13 @@ namespace App\Http\Controllers;
 
 use App\Models\Client;
 use App\Models\Installation;
+use App\Models\InstallationModule;
+use App\Models\Payment;
 use App\Models\Subscription;
 use App\Services\AuditLogService;
 use App\Services\InstallationAccessService;
+use App\Services\SubscriptionService;
+use DateTimeInterface;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
@@ -16,6 +20,7 @@ class InstallationController extends Controller
     public function __construct(
         private readonly AuditLogService $auditLogService,
         private readonly InstallationAccessService $installationAccessService,
+        private readonly SubscriptionService $subscriptionService,
     ) {}
 
     /**
@@ -82,14 +87,28 @@ class InstallationController extends Controller
         $installation->load([
             'client',
             'subscriptions' => fn ($query) => $query->orderByDesc('id'),
+            'installationModules.module',
         ]);
 
-        $lastSubscription = $this->installationAccessService->latestSubscription($installation);
+        $currentSubscription = $this->installationAccessService->latestSubscription($installation);
+
+        $credit = null;
+
+        if ($currentSubscription !== null) {
+            $creditSummary = $this->subscriptionService->summarizeSubscriptionCreditForDisplay($currentSubscription);
+            $credit = [
+                'available_months' => (int) $creditSummary['available_months'],
+                'payment_count' => (int) $creditSummary['payment_count'],
+            ];
+        }
 
         return Inertia::render('Installations/Show', [
             'installation' => $this->serializeInstallationForShow($installation),
             'access' => $this->installationAccessService->accessSummary($installation),
-            'lastSubscription' => $this->serializeLastSubscription($lastSubscription),
+            'lastSubscription' => $this->serializeLastSubscription($currentSubscription),
+            'credit' => $credit,
+            'paymentsSummary' => $this->paymentsSummaryForInstallation($installation, $currentSubscription),
+            'modules' => $this->serializeInstallationModules($installation),
         ]);
     }
 
@@ -221,6 +240,80 @@ class InstallationController extends Controller
                 ]),
             ],
         );
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function paymentsSummaryForInstallation(Installation $installation, ?Subscription $currentSubscription): array
+    {
+        $subscriptionIds = $currentSubscription !== null
+            ? collect([$currentSubscription->id])
+            : Subscription::query()
+                ->where('installation_id', $installation->id)
+                ->pluck('id');
+
+        if ($subscriptionIds->isEmpty()) {
+            return [
+                'count' => 0,
+                'last_payment' => null,
+            ];
+        }
+
+        $paymentsCount = Payment::query()
+            ->whereIn('subscription_id', $subscriptionIds)
+            ->count();
+
+        $lastPayment = Payment::query()
+            ->whereIn('subscription_id', $subscriptionIds)
+            ->orderByDesc('paid_at')
+            ->orderByDesc('id')
+            ->first();
+
+        return [
+            'count' => $paymentsCount,
+            'last_payment' => $lastPayment !== null ? [
+                'id' => $lastPayment->id,
+                'amount' => (int) $lastPayment->amount,
+                'currency' => (string) $lastPayment->currency,
+                'paid_at' => $this->formatDateTimeValue($lastPayment->paid_at),
+            ] : null,
+        ];
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function serializeInstallationModules(Installation $installation): array
+    {
+        return $installation->installationModules
+            ->sortByDesc('id')
+            ->values()
+            ->map(function (InstallationModule $installationModule): array {
+                $module = $installationModule->module;
+
+                return [
+                    'id' => $installationModule->id,
+                    'status' => (string) $installationModule->status,
+                    'version' => $installationModule->version,
+                    'module' => $module !== null ? [
+                        'id' => $module->id,
+                        'name' => (string) $module->name,
+                        'price' => $module->price !== null ? (int) $module->price : null,
+                        'currency' => (string) $module->currency,
+                    ] : null,
+                ];
+            })
+            ->all();
+    }
+
+    private function formatDateTimeValue(mixed $value): ?string
+    {
+        if ($value instanceof DateTimeInterface) {
+            return $value->format('Y-m-d H:i:s');
+        }
+
+        return null;
     }
 
     /**

@@ -6,6 +6,7 @@ use App\Exceptions\Subscription\SubscriptionRenewalException;
 use App\Exceptions\Subscription\SubscriptionServiceException;
 use App\Models\Payment;
 use App\Models\Subscription;
+use App\Models\SubscriptionPaymentConsumption;
 use App\Services\AuditLogService;
 use App\Services\SubscriptionService;
 use DateTimeInterface;
@@ -80,12 +81,19 @@ class PaymentController extends Controller
     {
         $payment->load([
             'subscription.installation.client',
+            'consumptions' => fn ($query) => $query->orderBy('consumed_at')->orderBy('id'),
         ]);
+        $payment->loadCount('consumptions');
+
+        $paymentCredit = $this->paymentCreditForDisplay($payment);
 
         $canRenewSubscription = $this->subscriptionService->canRenewFromPayment($payment);
 
+        $payment->unsetRelation('consumptions');
+
         return Inertia::render('Subscriptions/Payments/Show', [
             'payment' => $payment,
+            'paymentCredit' => $paymentCredit,
             'canRenewSubscription' => $canRenewSubscription,
             'renewalPreview' => $canRenewSubscription
                 ? $this->subscriptionService->previewRenewalFromPayment($payment)
@@ -450,6 +458,54 @@ class PaymentController extends Controller
         }
 
         return (string) $value;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function paymentCreditForDisplay(Payment $payment): array
+    {
+        $consumptionsCount = (int) $payment->consumptions_count;
+        $remaining = $payment->remainingCreditMonths();
+        $purchased = $payment->credit_months_purchased !== null
+            ? (int) $payment->credit_months_purchased
+            : null;
+        $monthlyUnitAmount = $payment->monthly_unit_amount !== null
+            ? (int) $payment->monthly_unit_amount
+            : null;
+        $hasCreditDefinition = $purchased !== null && $monthlyUnitAmount !== null;
+
+        $consumptions = $payment->consumptions
+            ->map(function (SubscriptionPaymentConsumption $consumption): array {
+                return [
+                    'id' => $consumption->id,
+                    'period_start' => $consumption->period_start?->format('Y-m-d H:i:s'),
+                    'period_end' => $consumption->period_end?->format('Y-m-d H:i:s'),
+                    'consumed_at' => $consumption->consumed_at?->format('Y-m-d H:i:s'),
+                ];
+            })
+            ->values()
+            ->all();
+
+        $isPaid = $payment->isPaid();
+        $isRefunded = $payment->isRefunded();
+
+        return [
+            'amount' => (int) $payment->amount,
+            'currency' => (string) $payment->currency,
+            'monthly_unit_amount' => $monthlyUnitAmount,
+            'credit_months_purchased' => $purchased,
+            'credit_months_remaining' => $remaining,
+            'consumptions_count' => $consumptionsCount,
+            'credit_exhausted_at' => $payment->credit_exhausted_at?->format('Y-m-d H:i:s'),
+            'status' => (string) $payment->status,
+            'is_refunded' => $isRefunded,
+            'is_paid' => $isPaid,
+            'presents_consumable_credit' => $isPaid && ! $isRefunded && $remaining > 0 && $hasCreditDefinition,
+            'is_exhausted' => $hasCreditDefinition && $remaining === 0 && $consumptionsCount > 0,
+            'show_credit_details' => $hasCreditDefinition || $consumptionsCount > 0,
+            'consumptions' => $consumptions,
+        ];
     }
 
     /**

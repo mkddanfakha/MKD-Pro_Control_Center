@@ -16,6 +16,10 @@ const props = defineProps({
         type: Object,
         default: null,
     },
+    paymentCredit: {
+        type: Object,
+        required: true,
+    },
 });
 
 const page = usePage();
@@ -164,6 +168,103 @@ function confirmRenewSubscription() {
             showRenewConfirm.value = false;
         },
     });
+}
+
+function formatMonthsCount(count) {
+    if (count === null || count === undefined || count === '') {
+        return '—';
+    }
+
+    const value = Number(count);
+
+    if (Number.isNaN(value)) {
+        return '—';
+    }
+
+    if (value <= 1) {
+        return '1 mois';
+    }
+
+    return `${value} mois`;
+}
+
+function consumedMonthsLabel(count) {
+    const value = Number(count);
+
+    if (Number.isNaN(value) || value === 0) {
+        return '0 mois';
+    }
+
+    if (value === 1) {
+        return '1 mois consommé';
+    }
+
+    return `${value} mois consommés`;
+}
+
+function remainingMonthsLabel(count) {
+    const value = Number(count);
+
+    if (Number.isNaN(value)) {
+        return '—';
+    }
+
+    if (value === 0) {
+        return '0 mois restants';
+    }
+
+    if (value === 1) {
+        return '1 mois restant';
+    }
+
+    return `${value} mois restants`;
+}
+
+function formatPeriodMonthLabel(value) {
+    if (!value || String(value).trim() === '') {
+        return '—';
+    }
+
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) {
+        return '—';
+    }
+
+    const formatted = new Intl.DateTimeFormat('fr-FR', {
+        month: 'long',
+        year: 'numeric',
+    }).format(date);
+
+    return formatted.charAt(0).toUpperCase() + formatted.slice(1);
+}
+
+function formatDateOnly(value) {
+    if (!value || String(value).trim() === '') {
+        return '—';
+    }
+
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) {
+        return '—';
+    }
+
+    return new Intl.DateTimeFormat('fr-FR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+    }).format(date);
+}
+
+function consumptionPeriodLabel(consumption) {
+    const startLabel = formatPeriodMonthLabel(consumption.period_start);
+
+    if (startLabel === '—') {
+        return '—';
+    }
+
+    return startLabel;
 }
 
 function paymentMethodLabel(method) {
@@ -421,6 +522,155 @@ function paymentMethodLabel(method) {
                             </dd>
                         </div>
                     </dl>
+                </section>
+
+                <section
+                    v-if="paymentCredit.show_credit_details"
+                    class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8"
+                >
+                    <h2 class="text-lg font-semibold text-gray-900">
+                        Crédit de ce paiement
+                    </h2>
+
+                    <p class="mt-1 text-sm text-gray-500">
+                        Mois de crédit achetés, consommés et restants pour ce paiement (tarif enregistré au moment du paiement).
+                    </p>
+
+                    <div
+                        v-if="paymentCredit.is_refunded"
+                        class="mt-4 rounded-lg border border-gray-300 bg-gray-100 px-4 py-3 text-sm font-medium text-gray-800"
+                        role="status"
+                    >
+                        Paiement remboursé — l’historique est conservé, mais ce paiement n’est plus une source de crédit disponible.
+                    </div>
+
+                    <div
+                        v-else-if="!paymentCredit.is_paid"
+                        class="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950"
+                        role="status"
+                    >
+                        Crédit non disponible tant que le paiement n’est pas au statut payé.
+                    </div>
+
+                    <dl class="mt-6 grid gap-6 sm:grid-cols-2">
+                        <div class="sm:col-span-2">
+                            <dt class="text-sm font-medium text-gray-500">
+                                Montant
+                            </dt>
+                            <dd class="mt-1 text-sm font-medium text-gray-900">
+                                {{ formatAmount(paymentCredit.amount, paymentCredit.currency) }}
+                            </dd>
+                        </div>
+
+                        <div>
+                            <dt class="text-sm font-medium text-gray-500">
+                                Tarif mensuel de référence
+                            </dt>
+                            <dd class="mt-1 text-sm text-gray-900">
+                                <template v-if="paymentCredit.monthly_unit_amount !== null">
+                                    {{ formatAmount(paymentCredit.monthly_unit_amount, paymentCredit.currency) }}/mois
+                                </template>
+                                <template v-else>
+                                    —
+                                </template>
+                            </dd>
+                            <dd class="mt-1 text-xs text-gray-500">
+                                Tarif mensuel enregistré pour ce paiement.
+                            </dd>
+                        </div>
+
+                        <div>
+                            <dt class="text-sm font-medium text-gray-500">
+                                Crédit acheté
+                            </dt>
+                            <dd class="mt-1 text-sm font-medium text-gray-900">
+                                {{ formatMonthsCount(paymentCredit.credit_months_purchased) }}
+                            </dd>
+                        </div>
+
+                        <div>
+                            <dt class="text-sm font-medium text-gray-500">
+                                Crédit consommé
+                            </dt>
+                            <dd class="mt-1 text-sm text-gray-900">
+                                {{ consumedMonthsLabel(paymentCredit.consumptions_count) }}
+                            </dd>
+                        </div>
+
+                        <div>
+                            <dt class="text-sm font-medium text-gray-500">
+                                Crédit restant
+                            </dt>
+                            <dd class="mt-1 text-sm font-medium text-gray-900">
+                                <template v-if="paymentCredit.presents_consumable_credit">
+                                    {{ remainingMonthsLabel(paymentCredit.credit_months_remaining) }}
+                                </template>
+                                <template v-else-if="paymentCredit.is_refunded">
+                                    {{ remainingMonthsLabel(paymentCredit.credit_months_remaining) }}
+                                    <span class="mt-1 block text-xs font-normal text-gray-500">
+                                        Non consommable (remboursé).
+                                    </span>
+                                </template>
+                                <template v-else-if="!paymentCredit.is_paid">
+                                    —
+                                </template>
+                                <template v-else>
+                                    {{ remainingMonthsLabel(paymentCredit.credit_months_remaining) }}
+                                </template>
+                            </dd>
+                        </div>
+
+                        <div
+                            v-if="paymentCredit.is_exhausted"
+                            class="sm:col-span-2"
+                        >
+                            <dt class="text-sm font-medium text-gray-500">
+                                État du crédit
+                            </dt>
+                            <dd class="mt-1">
+                                <span class="inline-flex rounded-full bg-gray-200 px-2.5 py-0.5 text-xs font-medium text-gray-800 ring-1 ring-inset ring-gray-300">
+                                    Crédit épuisé
+                                </span>
+                                <span
+                                    v-if="paymentCredit.credit_exhausted_at"
+                                    class="mt-2 block text-sm text-gray-600"
+                                >
+                                    Épuisé le {{ formatDate(paymentCredit.credit_exhausted_at) }}
+                                </span>
+                            </dd>
+                        </div>
+                    </dl>
+
+                    <div class="mt-8">
+                        <h3 class="text-sm font-semibold text-gray-900">
+                            Crédit consommé
+                        </h3>
+
+                        <ul
+                            v-if="paymentCredit.consumptions?.length"
+                            class="mt-4 space-y-3"
+                        >
+                            <li
+                                v-for="consumption in paymentCredit.consumptions"
+                                :key="consumption.id"
+                                class="rounded-lg border border-gray-200 bg-gray-50/80 px-4 py-3 text-sm text-gray-900"
+                            >
+                                <span class="font-medium">
+                                    {{ consumptionPeriodLabel(consumption) }}
+                                </span>
+                                <span class="text-gray-600">
+                                    → consommé le {{ formatDateOnly(consumption.consumed_at) }}
+                                </span>
+                            </li>
+                        </ul>
+
+                        <p
+                            v-else
+                            class="mt-3 text-sm text-gray-500"
+                        >
+                            Aucune consommation enregistrée.
+                        </p>
+                    </div>
                 </section>
 
                 <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">
