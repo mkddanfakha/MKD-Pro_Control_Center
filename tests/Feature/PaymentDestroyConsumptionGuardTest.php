@@ -9,7 +9,13 @@ use App\Models\Payment;
 use App\Models\Subscription;
 use App\Models\SubscriptionPaymentConsumption;
 use App\Models\User;
+use App\Http\Middleware\HandleInertiaRequests;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Request;
+use Illuminate\Support\MessageBag;
+use Illuminate\Support\ViewErrorBag;
+use Inertia\Inertia;
+use ReflectionMethod;
 use Tests\TestCase;
 
 class PaymentDestroyConsumptionGuardTest extends TestCase
@@ -76,6 +82,60 @@ class PaymentDestroyConsumptionGuardTest extends TestCase
         $this->assertSame(0, AuditLog::query()->where('action', 'payment.deleted')->count());
     }
 
+    public function test_destroy_allows_legacy_renewal_applied_at_without_consumption_rows(): void
+    {
+        $user = User::factory()->create();
+        $subscription = $this->makeSubscription();
+        $payment = $this->makePaidPayment($subscription, [
+            'renewal_applied_at' => '2026-10-20 12:00:00',
+        ]);
+        $paymentId = $payment->id;
+
+        $this->assertSame(
+            0,
+            SubscriptionPaymentConsumption::query()->where('payment_id', $paymentId)->count(),
+        );
+
+        $response = $this->actingAs($user)->delete(route('payments.destroy', $payment));
+
+        $response->assertRedirect(route('payments.index'));
+        $response->assertSessionHasNoErrors();
+        $this->assertDatabaseMissing('payments', ['id' => $paymentId]);
+        $this->assertSame(1, AuditLog::query()->where('action', 'payment.deleted')->count());
+        $this->assertSame(
+            0,
+            SubscriptionPaymentConsumption::query()->where('payment_id', $paymentId)->count(),
+        );
+    }
+
+    public function test_destroy_rejects_consumed_payment_via_inertia_with_payment_error(): void
+    {
+        $user = User::factory()->create();
+        [, $payment] = $this->makePaidPaymentWithConsumption();
+
+        $redirectResponse = $this->actingAs($user)
+            ->from(route('payments.index'))
+            ->withHeaders($this->inertiaRequestHeaders())
+            ->delete(route('payments.destroy', $payment));
+
+        $redirectResponse->assertRedirect(route('payments.index'));
+        $redirectResponse->assertSessionHasErrors([
+            'payment' => 'Ce paiement ne peut pas être supprimé car son crédit a déjà été consommé.',
+        ]);
+        $this->assertDatabaseHas('payments', ['id' => $payment->id]);
+        $this->assertSame(1, SubscriptionPaymentConsumption::query()->where('payment_id', $payment->id)->count());
+        $this->assertSame(0, AuditLog::query()->where('action', 'payment.deleted')->count());
+
+        $paymentErrorMessage = $this->app->make('session.store')->get('errors')->get('payment')[0];
+
+        $this->assertSame(
+            'Ce paiement ne peut pas être supprimé car son crédit a déjà été consommé.',
+            $paymentErrorMessage,
+        );
+
+        $this->assertInertiaPaymentErrorPropFromSessionValidationErrors($paymentErrorMessage);
+    }
+
     public function test_destroy_allows_paid_payment_without_consumption(): void
     {
         $user = User::factory()->create();
@@ -97,6 +157,42 @@ class PaymentDestroyConsumptionGuardTest extends TestCase
         $response->assertRedirect(route('payments.index'));
         $this->assertDatabaseMissing('payments', ['id' => $paymentId]);
         $this->assertSame(0, SubscriptionPaymentConsumption::query()->where('payment_id', $paymentId)->count());
+    }
+
+    private function assertInertiaPaymentErrorPropFromSessionValidationErrors(string $expectedMessage): void
+    {
+        $session = $this->app->make('session.store');
+        $session->start();
+        $session->put('errors', tap(new ViewErrorBag, function (ViewErrorBag $bag) use ($expectedMessage) {
+            $bag->put('default', new MessageBag([
+                'payment' => [$expectedMessage],
+            ]));
+        }));
+
+        $request = Request::create(route('payments.index'), 'GET');
+        $request->setLaravelSession($session);
+
+        $middleware = app(HandleInertiaRequests::class);
+        $method = new ReflectionMethod($middleware, 'resolveValidationErrors');
+        $method->setAccessible(true);
+
+        /** @var object $errors */
+        $errors = $method->invoke($middleware, $request);
+
+        $this->assertSame($expectedMessage, $errors->payment ?? null);
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function inertiaRequestHeaders(): array
+    {
+        return [
+            'X-Inertia' => 'true',
+            'X-Inertia-Version' => (string) Inertia::getVersion(),
+            'Accept' => 'text/html, application/xhtml+xml',
+            'X-Requested-With' => 'XMLHttpRequest',
+        ];
     }
 
     /**
