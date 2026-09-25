@@ -93,6 +93,7 @@ class SubscriptionController extends Controller
 
         return Inertia::render('Subscriptions/Create', [
             'installations' => $installations,
+            'defaultMonthlyAmount' => (int) config('subscriptions.default_monthly_amount'),
         ]);
     }
 
@@ -102,7 +103,7 @@ class SubscriptionController extends Controller
     public function store(Request $request): RedirectResponse
     {
         $request->merge([
-            'amount' => $request->filled('amount') ? $request->input('amount') : 15000,
+            'amount' => $request->filled('amount') ? $request->input('amount') : config('subscriptions.default_monthly_amount'),
             'currency' => $request->filled('currency') ? $request->input('currency') : 'XOF',
         ]);
 

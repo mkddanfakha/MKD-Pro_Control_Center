@@ -79,6 +79,7 @@ class PaymentController extends Controller
     {
         return Inertia::render('Subscriptions/Payments/Create', [
             'subscriptions' => $this->subscriptionsForForm(),
+            'defaultMonthlyAmount' => (int) config('subscriptions.default_monthly_amount'),
         ]);
     }
 

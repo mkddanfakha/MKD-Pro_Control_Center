@@ -711,7 +711,7 @@ function paymentMethodLabel(method) {
                     <dl class="mt-6 grid gap-6 sm:grid-cols-2">
                         <div>
                             <dt class="text-sm font-medium text-gray-500">
-                                Montant de l'abonnement
+                                Montant mensuel (tarif en vigueur)
                             </dt>
                             <dd class="mt-1 text-sm font-medium text-gray-900">
                                 {{ formatAmount(payment.subscription?.amount, payment.subscription?.currency) }}

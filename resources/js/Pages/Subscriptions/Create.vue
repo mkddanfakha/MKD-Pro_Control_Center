@@ -2,16 +2,20 @@
 import AdminLayout from '@/Layouts/AdminLayout.vue';
 import { Head, Link, useForm } from '@inertiajs/vue3';
 
-defineProps({
+const props = defineProps({
     installations: {
         type: Array,
+        required: true,
+    },
+    defaultMonthlyAmount: {
+        type: Number,
         required: true,
     },
 });
 
 const form = useForm({
     installation_id: '',
-    amount: 15000,
+    amount: props.defaultMonthlyAmount,
     currency: 'XOF',
     starts_at: '',
     notes: '',

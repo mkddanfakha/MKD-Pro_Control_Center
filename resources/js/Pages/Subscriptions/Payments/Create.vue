@@ -8,6 +8,10 @@ const props = defineProps({
         type: Array,
         required: true,
     },
+    defaultMonthlyAmount: {
+        type: Number,
+        required: true,
+    },
 });
 
 function toDatetimeLocalValue(value) {
@@ -36,7 +40,7 @@ function toDatetimeLocalValue(value) {
 
 const form = useForm({
     subscription_id: '',
-    amount: 15000,
+    amount: props.defaultMonthlyAmount,
     currency: 'XOF',
     status: 'paid',
     due_at: '',

@@ -44,6 +44,25 @@ class SubscriptionStoreTest extends TestCase
         $this->assertSame('2026-10-01 00:00:00', $log->new_values['starts_at']);
         $this->assertSame('2026-10-01 00:00:00', $log->new_values['current_period_start']);
         $this->assertSame('2026-10-31 23:59:59', $log->new_values['current_period_end']);
+        $this->assertSame((int) config('subscriptions.default_monthly_amount'), (int) $subscription->amount);
+    }
+
+    public function test_store_uses_explicit_amount_when_provided_instead_of_default(): void
+    {
+        $user = User::factory()->create();
+        $installation = $this->makeInstallation();
+
+        $response = $this->actingAs($user)->post(route('subscriptions.store'), [
+            'installation_id' => $installation->id,
+            'starts_at' => '2026-10-01 00:00:00',
+            'amount' => 20000,
+        ]);
+
+        $response->assertRedirect();
+
+        $subscription = Subscription::query()->where('installation_id', $installation->id)->firstOrFail();
+
+        $this->assertSame(20000, (int) $subscription->amount);
     }
 
     public function test_store_rejects_creation_without_starts_at(): void
