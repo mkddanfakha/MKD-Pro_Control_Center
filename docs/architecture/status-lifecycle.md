@@ -32,11 +32,24 @@ Le cycle de vie abonnement (`SubscriptionService::syncLifecycle()`) **ne modifie
 
 ---
 
+## Deux axes indépendants (résumé)
+
+| Axe | Champ | Rôle principal | Contrôle l’accès calculé ? |
+|-----|--------|----------------|----------------------------|
+| **1 — Installation** | `installations.status` | État de l’installation côté Control Center (CRUD, filtres, statistiques Dashboard) | **Non** |
+| **2 — Abonnement** | `subscriptions.status` | Cycle de vie commercial / facturation | **Oui** (via `InstallationAccessService`) |
+
+`InstallationAccessService` **n’interprète pas** les valeurs `inactive`, `suspended` ni `terminated` sur l’installation : seul le statut de la **subscription courante** (non terminée) compte pour l’accès.
+
+---
+
 ## `Installation.status`
 
 ### Responsabilité
 
-> État opérationnel / administratif de l’instance MKD-Pro Gestion dans le Control Center.
+> État de l’installation enregistrée dans le Control Center (`installations.status`).
+
+Ce statut est **géré par le CRUD** (`InstallationController`), **filtrable** sur la liste (`/installations?status=…`) et **agrégé** dans les statistiques Dashboard (voir § Dashboard). Il **ne détermine pas** l’accès applicatif calculé aujourd’hui.
 
 Valeurs **validées aujourd’hui** à la création / modification d’une installation (`InstallationController`) :
 
@@ -132,7 +145,7 @@ La commande planifiée `subscriptions:sync-lifecycle` ne traite que les abonneme
 
 | Aspect | Description |
 |--------|-------------|
-| **Condition d’entrée** | Création / édition admin ; retour à `active` après **renouvellement** via paiement payé (`renew()`). |
+| **Condition d’entrée** | Création admin (`SubscriptionController::store`, statut initial `active`) ; retour à `active` après **consommation de crédit** / renouvellement (`advanceSubscriptionToPeriod`, `renew()`, `consumeCreditFromPayment()`). |
 | **Signification** | Période courante **en cours** ou considérée valide côté commercial. |
 | **Accès calculé** | `accessible` → `isAccessible()` = **true**. |
 | **Transitions possibles** | → `grace_period` (auto si `current_period_end` dépassé) ; → `suspended` / `terminated` (manuel) ; renouvellement repasse en `active`. |
@@ -161,8 +174,10 @@ La commande planifiée `subscriptions:sync-lifecycle` ne traite que les abonneme
 |--------|-------------|
 | **Condition d’entrée** | **Manuelle** uniquement dans le cycle automatisé actuel. |
 | **Signification** | Abonnement **clos** définitivement. |
-| **Accès calculé** | `terminated` → **false**. |
-| **Transitions possibles** | Aucune transition métier standard (état terminal côté produit). |
+| **Accès calculé** | Aucune subscription **non terminée** retenue → voir § Nuance `terminated` / `no_subscription`. |
+| **Transitions possibles** | Aucune réactivation via CRUD (`SubscriptionController` refuse de sortir de `terminated`) ; nouvel abonnement = **nouvelle** ligne `subscriptions`. |
+
+**Scheduler :** `subscriptions:sync-lifecycle` **ne charge pas** les abonnements `suspended` ni `terminated` ; un abonnement `suspended` **n’est pas** réactivé automatiquement par le scheduler (seule la consommation de crédit / édition manuelle peut le remettre à `active` selon les règles actuelles).
 
 ---
 
@@ -170,21 +185,41 @@ La commande planifiée `subscriptions:sync-lifecycle` ne traite que les abonneme
 
 Service **sans effet de bord** : lecture seule, **ne modifie** ni installation, ni abonnement, ni base.
 
-- Sélection de l’abonnement pertinent : **`$installation->subscriptions()->latest('id')->first()`** (dernier enregistrement par `id` décroissant).
-- **`Installation.status` n’est pas pris en compte** dans le calcul.
+### Subscription courante
 
-### Matrice d’accès (état du code)
+`latestSubscription()` retourne **au plus une** ligne parmi les statuts **non terminés** :
 
-| Subscription.status | accessStatus      | Accessible (`isAccessible()`) |
-| ------------------- | ----------------- | ----------------------------- |
-| active              | accessible        | oui                           |
-| grace_period        | accessible        | oui                           |
-| suspended           | suspended         | non                           |
-| terminated          | terminated        | non                           |
-| aucune subscription | no_subscription   | non                           |
-| statut inconnu      | suspended         | non                           |
+```text
+active | grace_period | suspended
+```
 
-Pour un statut d’abonnement **inconnu**, `accessStatus` retourne `suspended` (refus d’accès dans le calcul) ; seules les valeurs listées ci-dessus sont des statuts métier définis.
+Tri : **`id` décroissant** (`latest('id')`) parmi ce sous-ensemble. Les subscriptions **`terminated`** sont **historiques** : elles **ne sont pas** la subscription courante et **ne participent pas** à la sélection.
+
+Plusieurs subscriptions `terminated` sur la même installation sont **autorisées** (politique d’unicité — voir [`subscription-model.md`](subscription-model.md)).
+
+- **`Installation.status` n’est jamais lu** dans le calcul d’accès.
+
+### Matrice d’accès (comportement API `accessSummary()` / `accessStatus()`)
+
+| Situation (subscription courante) | `access.status` | Accessible (`isAccessible()`) |
+| --------------------------------- | ----------------- | ----------------------------- |
+| `active`                          | `accessible`      | oui                           |
+| `grace_period`                    | `accessible`      | oui                           |
+| `suspended`                       | `suspended`       | non                           |
+| Aucune non terminée (y compris **uniquement** des `terminated`) | `no_subscription` | non                           |
+| Statut inconnu (hors liste métier en base) | `no_subscription` (non sélectionné par `latestSubscription()`) | non |
+
+### Nuance `terminated` / `no_subscription`
+
+Lorsqu’une installation ne possède **que** des subscriptions `terminated` (ou aucune subscription), **`accessSummary()`** retourne :
+
+- `accessible` : **false**
+- `status` : **`no_subscription`**
+- `subscription_status` : **null**
+
+Les lignes `terminated` sont **exclues** de `latestSubscription()` ; le code interne `accessStatusForSubscription()` pourrait mapper `terminated` → `terminated`, mais ce chemin **n’est pas** utilisé par `accessStatus()` / `accessSummary()` lorsque seules des subscriptions terminées existent. C’est le **comportement actuel** de l’API (sans modification de code prévue dans ce document).
+
+L’UI (`Installations/Index.vue`, `Show.vue`) prévoit un libellé pour `access.status === 'terminated'`, mais le contrôleur **n’émet pas** cette valeur dans le scénario « uniquement terminated » aujourd’hui.
 
 ### Affichage UI
 
@@ -228,6 +263,41 @@ L’accès calculé reste **autorisé** (basé uniquement sur l’abonnement `ac
 
 Peut être **cohérent** dans un processus de fin de vie **manuel** (clôture commerciale + retrait ops).  
 **Aucune synchronisation automatique** entre les deux champs n’existe dans le code actuel.
+Accès calculé : **`no_subscription`** si aucune subscription non terminée n’existe (même si des `terminated` restent en historique).
+
+### Cas 6 — Toute valeur `Installation.status` + subscription non terminée `active` ou `grace_period`
+
+L’accès calculé reste **autorisé** ; le statut installation est **affiché à part** (ex. test `InstallationShowAccessTest::test_show_preserves_installation_status_when_subscription_is_active` avec installation `suspended` et abonnement `active`).
+
+---
+
+## Dashboard (statistiques et liens)
+
+Les compteurs Dashboard **ne utilisent pas** `InstallationAccessService` ; ils s’appuient sur les champs `status` en base.
+
+### Installations (`DashboardController::installationStatistics()`)
+
+Cartes cliquables affichées :
+
+- `active`
+- `suspended`
+- `terminated`
+
+Le total **`totalInstallations`** compte **toutes** les installations (y compris `inactive`).
+**`inactive`** est **filtrable** via `/installations?status=inactive` mais **n’a pas** de carte Dashboard dédiée (choix produit actuel, pas une erreur technique).
+
+Référence tests : `InstallationIndexFiltersTest` (filtre `inactive`).
+
+### Abonnements (`DashboardController::subscriptionStatistics()`)
+
+Cartes :
+
+- `active`
+- `grace_period`
+- `suspended`
+- `terminated`
+
+Alerte « expiration sous 7 jours » : subscriptions **`active`** avec `current_period_end` dans la fenêtre — indépendant de `Installation.status`.
 
 ---
 
@@ -254,7 +324,11 @@ Questions **ouvertes** (non tranchées dans ce document) :
 | Sync planifiée | `subscriptions:sync-lifecycle`, `routes/console.php` |
 | Accès calculé | `InstallationAccessService` |
 | Affichage accès | `InstallationController::show`, `Installations/Show.vue` |
-| Non-modification installation par lifecycle | Tests `SubscriptionLifecycleSyncTest` |
+| Non-modification installation par lifecycle | `InstallationAuditTest::test_installation_status_change_does_not_modify_subscription` |
+| Accès HTTP (props Inertia) | `InstallationShowAccessTest` |
+| Filtres installation (`inactive`, etc.) | `InstallationIndexFiltersTest` |
+| Lifecycle abonnement (transitions) | `SubscriptionLifecycleSyncTest`, `SyncSubscriptionLifecycleCommandTest` |
+| Unicité subscription non terminée (DB) | `SubscriptionUniquenessConstraintTest` |
 
 ---
 

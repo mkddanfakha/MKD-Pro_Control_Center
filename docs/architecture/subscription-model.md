@@ -4,7 +4,7 @@ Document de référence pour le **MKD-Pro Control Center**.
 Complète [`status-lifecycle.md`](status-lifecycle.md) (séparation `Installation.status` / `Subscription.status`).
 
 Dernière mise à jour modèle crédit : **25/09/2026** (Tasks 89–100, doc Task 103).
-Dernière inspection données : **24/09/2026** (Task 36).
+Dernière alignement doc / code (Installation ↔ Subscription ↔ Access) : **25/09/2026** (Task 147).
 
 ---
 
@@ -107,6 +107,8 @@ Exemple : paiement **180 000 XOF**, mensualité **15 000 XOF**, **12** mois 
 | 2ᵉ consommation | 1 mois de plus consommé, **10** mois restants, etc. |
 
 Chaque consommation crée **exactement une** ligne `subscription_payment_consumptions` et appelle la logique centrale **`performCreditConsumption()`** (via `consumeCreditFromPayment()` ou `consumeNextCreditForSubscription()`).
+
+**Séparation Installation / Subscription :** une consommation de crédit **avance** la période de la subscription concernée et, lorsque les règles de renouvellement sont satisfaites, remet le **`status`** de cette subscription à **`active`** (`advanceSubscriptionToPeriod`). Elle **ne modifie pas** `Installation.status` ni les horodatages ops de l’installation (`suspended_at`, `terminated_at`, `installed_at`, `last_seen_at` sur `installations`).
 
 ### Table `subscription_payment_consumptions`
 
@@ -252,27 +254,45 @@ Créer une nouvelle subscription par mois **n’est pas** le modèle retenu : le
 
 ---
 
-## Schéma SQL vs modèle métier cible
+## Schéma SQL et politique d’unicité (état actuel)
 
 | Aspect | État actuel |
 |--------|-------------|
 | Relation Eloquent | `Installation` **hasMany** `Subscription` |
-| Contraintes DB | **Aucune** unicité « une subscription non terminée par installation » ; **aucune** interdiction de plusieurs `active` |
-| Données (inspection 24/09/2026) | 3 installations, 2 subscriptions, **aucune** installation avec plusieurs subscriptions |
+| Unicité « non terminée » | **Imposée** : colonne générée `non_terminated_installation_id` + index unique `subscriptions_non_terminated_installation_id_unique` (migration `2026_09_24_164500_add_non_terminated_uniqueness_to_subscriptions_table.php`) |
+| Validation applicative | `SubscriptionController` (création + mise à jour) ; message « Cette installation possède déjà un abonnement non terminé. » |
+| Historique `terminated` | **Plusieurs** subscriptions `terminated` par installation **autorisées** |
 
-**Modèle métier cible :** une **subscription courante** (non `terminated`) par installation, avec plusieurs subscriptions **`terminated`** possibles en historique (voir décision **B** actée).
+**Règle :** au **maximum une** subscription **non terminée** (`active`, `grace_period`, `suspended`) par installation ; **plusieurs** `terminated` possibles.
 
-**Écart connu :** le schéma autorise encore plusieurs lignes non terminées ; une **future tâche** devra **imposer** la politique d’unicité documentée (validation, contrainte, sélection d’accès). **Cette documentation ne l’implémente pas** (cf. § Décisions actées — B).
+Tests : `SubscriptionUniquenessConstraintTest`, `SubscriptionStoreTest`, `SubscriptionUpdateTest`.
 
 ---
 
 ## Accès installation et sélection de la subscription
 
-Aujourd’hui, **`InstallationAccessService::latestSubscription()`** retourne la subscription avec le **`id` le plus élevé** pour l’installation (`max(id)`).
+**`InstallationAccessService`** calcule l’accès à partir de la **subscription courante**, **pas** à partir de `Installation.status`.
 
-Cette implémentation est **provisoire** : elle n’encode pas encore la politique d’unicité (**décision B** — une seule subscription non `terminated` par installation).
+`latestSubscription()` sélectionne la subscription **non terminée** la plus récente (`status IN (active, grace_period, suspended)`, tri `latest('id')`). Les subscriptions **`terminated`** ne sont **pas** la subscription courante.
 
-Une **tâche ultérieure** devra aligner la sélection (et la création) avec cette règle, afin de **ne plus dépendre** du choix arbitraire **`max(id)`** pour déterminer la subscription courante. **Ne pas modifier le service dans le cadre de la seule documentation.**
+| Subscription courante | Accès (`accessSummary`) |
+|-----------------------|-------------------------|
+| `active` | `accessible` — autorisé |
+| `grace_period` | `accessible` — autorisé |
+| `suspended` | `suspended` — non autorisé |
+| Aucune non terminée (uniquement `terminated` ou aucune ligne) | `no_subscription` — non autorisé |
+
+Voir [`status-lifecycle.md`](status-lifecycle.md) (§ Nuance `terminated` / `no_subscription`).
+
+Tests : `InstallationShowAccessTest`, `Tests\Unit\InstallationAccessServiceTest`.
+
+---
+
+## Dashboard (rappel)
+
+Statistiques **installations** : cartes `active`, `suspended`, `terminated` ; `inactive` filtrable sur `/installations?status=inactive` sans carte Dashboard.
+Statistiques **abonnements** : `active`, `grace_period`, `suspended`, `terminated`.
+Détail : [`status-lifecycle.md`](status-lifecycle.md) § Dashboard.
 
 ---
 
@@ -324,9 +344,9 @@ Règles :
 4. Une subscription **`suspended`** reste la **subscription courante** et peut être **renouvelée** selon les règles actuelles (`SubscriptionService::renew` / `renewFromPayment`).
 5. Une subscription **`terminated`** ne peut **plus** être réactivée ni renouvelée (cohérent avec la décision **A**).
 6. Lorsqu’un client **revient** après une subscription `terminated`, une **nouvelle** subscription **peut** être créée (nouveau cycle).
-7. Cette règle vise notamment à **supprimer la dépendance métier** au choix arbitraire **`max(id)`** pour identifier la subscription courante : la courante est la subscription **non `terminated`** (unique lorsque la règle est respectée).
+7. La subscription courante est la subscription **non `terminated`** (unique lorsque la règle est respectée), sélectionnée par `InstallationAccessService` parmi `active` / `grace_period` / `suspended`.
 
-**Non imposé aujourd’hui (décision documentée uniquement) :** cette politique **n’est pas encore appliquée** par la **base de données**, le **modèle Eloquent**, le **`SubscriptionController`**, ni un **service** dédié — le CRUD et le schéma actuels permettent encore plusieurs lignes non terminées.
+**Implémentation actuelle :** contrainte **base de données** (colonne générée + index unique) et **validation** dans `SubscriptionController` ; voir § Schéma SQL et politique d’unicité.
 
 #### C. Initialisation à la création — **décision prise**
 
@@ -343,28 +363,17 @@ Règles métier pour une **nouvelle** subscription commerciale :
 9. L’audit **`subscription.created`** devra refléter l’**état initial finalisé** de la subscription, **avec** sa période initiale renseignée (après `createInitialPeriod()`, pas un enregistrement sans période).
 10. La décision **B** s’applique : une nouvelle subscription ne peut être créée que s’il **n’existe aucune** subscription **non `terminated`** pour l’installation.
 
-**Non imposé aujourd’hui (décision documentée uniquement) :** cette politique **n’est pas encore implémentée** techniquement — `SubscriptionController::store()` crée encore la ligne sans appeler `createInitialPeriod()`, les dates restent optionnelles en validation, et le statut initial peut encore être choisi librement dans le formulaire.
+**Implémentation actuelle :** `SubscriptionController::store()` impose **`starts_at`**, crée la subscription en **`active`**, appelle **`SubscriptionService::createInitialPeriod()`** dans une transaction, puis audite `subscription.created`. Les mises à jour manuelles restent soumises aux règles de validation du contrôleur (périodes, unicité).
 
 ### Décisions encore ouvertes (modèle d’abonnement)
 
-**Aucune.** Les décisions **A**, **B** et **C** concernant le modèle d’abonnement par installation sont **actées** dans ce document. Les écarts avec le code ou la base relèvent d’**implémentations futures**, pas de décisions produit ouvertes.
+**Aucune** pour les règles **A**, **B** et **C** ci-dessus. Les questions **produit** sur le sens ops de `Installation.inactive` et l’accès réel côté MKD-Pro Gestion restent dans [`status-lifecycle.md`](status-lifecycle.md) (§ Décisions à prendre avant l’accès réel).
 
 ---
 
-## Conséquences d’implémentation futures
+## Données historiques / rétro-correction
 
-Lorsqu’une tâche d’implémentation appliquera les décisions **B** et **C**, elle devra notamment prévoir :
-
-- **Validation** de **`starts_at`** obligatoire à la création ;
-- **Interdiction** des **périodes partielles** (`current_period_start` / `current_period_end` saisis séparément ou incohérents avec la règle C) ;
-- **Statut initial** **`active`** imposé (ou forcé) pour une nouvelle subscription commerciale ;
-- **Appel** à **`SubscriptionService::createInitialPeriod()`** après création, lorsque les dates de période ne sont pas déjà définies conformément à la règle ;
-- **Transaction** englobant création + initialisation de période ;
-- **Audit** `subscription.created` **après** finalisation (période incluse dans le snapshot) ;
-- **Règle d’unicité B** : refus de création si une subscription non `terminated` existe déjà pour l’installation ;
-- **Alignement** ultérieur de **`InstallationAccessService`** avec la subscription courante (non `terminated`) plutôt que `max(id)` seul.
-
-Cette section **ne prescrit pas** l’ordre ni le périmètre exact d’une unique tâche code — elle liste les sujets techniques identifiés.
+Les inspections antérieures (ex. Task 36, 24/09/2026) peuvent mentionner des subscriptions de test **sans période** ou **sans** `grace_period_ends_at`. La politique documentée ci-dessus décrit le **comportement attendu du code actuel** pour les **nouvelles** créations ; une **rétro-correction** des jeux de données existants reste une **tâche distincte** si nécessaire.
 
 ---
 
