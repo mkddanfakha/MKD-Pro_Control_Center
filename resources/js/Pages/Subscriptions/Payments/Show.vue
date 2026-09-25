@@ -208,19 +208,23 @@ function paymentMethodLabel(method) {
                 class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
                 role="dialog"
                 aria-modal="true"
-                aria-labelledby="renew-subscription-title"
+                aria-labelledby="consume-payment-credit-title"
                 @click.self="showRenewConfirm = false"
             >
                 <div class="w-full max-w-lg rounded-xl bg-white p-6 shadow-lg ring-1 ring-gray-200">
                     <h2
-                        id="renew-subscription-title"
+                        id="consume-payment-credit-title"
                         class="text-lg font-semibold text-gray-900"
                     >
-                        Renouveler l'abonnement
+                        Consommer 1 mois de crédit
                     </h2>
 
                     <p class="mt-3 text-sm text-gray-600">
-                        Confirmez le renouvellement de l'abonnement à partir de ce paiement.
+                        Confirmer la consommation d’un mois de crédit sur ce paiement ?
+                    </p>
+
+                    <p class="mt-2 text-sm text-gray-500">
+                        Cette action utilisera 1 mois du crédit restant de ce paiement et financera la prochaine période de l’abonnement. Le crédit d’un autre paiement ne sera pas utilisé.
                     </p>
 
                     <dl class="mt-4 space-y-3 text-sm">
@@ -282,7 +286,7 @@ function paymentMethodLabel(method) {
                             :aria-busy="renewing"
                             @click="confirmRenewSubscription"
                         >
-                            {{ renewing ? 'Renouvellement…' : 'Confirmer le renouvellement' }}
+                            {{ renewing ? 'Consommation…' : 'Confirmer la consommation' }}
                         </button>
                     </div>
                 </div>
@@ -432,7 +436,7 @@ function paymentMethodLabel(method) {
                             :disabled="renewing"
                             @click="showRenewConfirm = true"
                         >
-                            Renouveler l'abonnement
+                            Consommer 1 mois de crédit
                         </button>
                     </div>
 
