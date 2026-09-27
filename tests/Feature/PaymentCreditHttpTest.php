@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\AuditLog;
 use App\Models\Client;
 use App\Models\Installation;
 use App\Models\Payment;
@@ -347,6 +348,175 @@ class PaymentCreditHttpTest extends TestCase
         $this->assertSame(Payment::STATUS_PAID, $payment->status);
     }
 
+    public function test_update_succeeds_when_paid_becomes_refunded_without_consumption(): void
+    {
+        $user = User::factory()->create();
+        $subscription = $this->makeSubscription(['amount' => 15000]);
+
+        $payment = $this->storePaidPayment($user, $subscription, 90000);
+
+        $this->assertSame(Payment::STATUS_PAID, $payment->status);
+        $this->assertSame(15000, (int) $payment->monthly_unit_amount);
+        $this->assertSame(6, (int) $payment->credit_months_purchased);
+
+        $subscriptionSnapshot = $subscription->fresh()->only(['amount', 'currency', 'status', 'installation_id']);
+
+        $response = $this->actingAs($user)->put(route('payments.update', $payment), $this->validPayload($subscription, [
+            'amount' => 90000,
+            'status' => Payment::STATUS_REFUNDED,
+            'paid_at' => '2026-10-01 12:00:00',
+        ]));
+
+        $response->assertRedirect(route('payments.show', $payment));
+
+        $payment->refresh();
+
+        $this->assertSame(Payment::STATUS_REFUNDED, $payment->status);
+        $this->assertSame(90000, (int) $payment->amount);
+        $this->assertSame(15000, (int) $payment->monthly_unit_amount);
+        $this->assertSame(6, (int) $payment->credit_months_purchased);
+        $this->assertSame(0, SubscriptionPaymentConsumption::query()->count());
+        $this->assertSame($subscriptionSnapshot, $subscription->fresh()->only(['amount', 'currency', 'status', 'installation_id']));
+
+        $log = AuditLog::query()->where('action', 'payment.updated')->sole();
+
+        $this->assertSame(Payment::STATUS_PAID, $log->old_values['status']);
+        $this->assertSame(Payment::STATUS_REFUNDED, $log->new_values['status']);
+    }
+
+    public function test_update_succeeds_when_refunded_becomes_paid_without_consumption(): void
+    {
+        $user = User::factory()->create();
+        $subscription = $this->makeSubscription(['amount' => 15000]);
+
+        $payment = Payment::query()->create([
+            'subscription_id' => $subscription->id,
+            'amount' => 90000,
+            'currency' => 'XOF',
+            'status' => Payment::STATUS_REFUNDED,
+            'paid_at' => '2026-10-01 12:00:00',
+            'monthly_unit_amount' => 15000,
+            'credit_months_purchased' => 6,
+        ]);
+
+        $response = $this->actingAs($user)->put(route('payments.update', $payment), $this->validPayload($subscription, [
+            'amount' => 90000,
+            'status' => Payment::STATUS_PAID,
+            'paid_at' => '2026-10-01 12:00:00',
+        ]));
+
+        $response->assertRedirect(route('payments.show', $payment));
+
+        $payment->refresh();
+
+        $this->assertSame(Payment::STATUS_PAID, $payment->status);
+        $this->assertSame(90000, (int) $payment->amount);
+        $this->assertSame(15000, (int) $payment->monthly_unit_amount);
+        $this->assertSame(6, (int) $payment->credit_months_purchased);
+        $this->assertSame(0, SubscriptionPaymentConsumption::query()->count());
+
+        $log = AuditLog::query()->where('action', 'payment.updated')->sole();
+
+        $this->assertSame(Payment::STATUS_REFUNDED, $log->old_values['status']);
+        $this->assertSame(Payment::STATUS_PAID, $log->new_values['status']);
+    }
+
+    public function test_paid_refunded_paid_cycle_allows_credit_consumption_via_http(): void
+    {
+        $user = User::factory()->create();
+        $subscription = $this->makeSubscription([
+            'amount' => 15000,
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        $payment = $this->storePaidPayment($user, $subscription, 90000);
+
+        $this->actingAs($user)->put(route('payments.update', $payment), $this->validPayload($subscription, [
+            'amount' => 90000,
+            'status' => Payment::STATUS_REFUNDED,
+            'paid_at' => '2026-10-01 12:00:00',
+        ]))->assertRedirect(route('payments.show', $payment));
+
+        $payment->refresh();
+
+        $this->assertSame(Payment::STATUS_REFUNDED, $payment->status);
+        $this->assertSame(0, SubscriptionPaymentConsumption::query()->count());
+        $this->assertSame(6, $payment->remainingCreditMonths());
+
+        $this->actingAs($user)->put(route('payments.update', $payment), $this->validPayload($subscription, [
+            'amount' => 90000,
+            'status' => Payment::STATUS_PAID,
+            'paid_at' => '2026-10-01 12:00:00',
+        ]))->assertRedirect(route('payments.show', $payment));
+
+        $payment->refresh();
+
+        $this->assertSame(Payment::STATUS_PAID, $payment->status);
+        $this->assertSame(6, $payment->remainingCreditMonths());
+        $this->assertSame(15000, (int) $payment->monthly_unit_amount);
+        $this->assertSame(6, (int) $payment->credit_months_purchased);
+
+        $this->actingAs($user)->post(route('subscriptions.consume-credit', $subscription))
+            ->assertRedirect(route('subscriptions.show', $subscription));
+
+        $payment->refresh();
+
+        $this->assertSame(1, SubscriptionPaymentConsumption::query()->count());
+        $this->assertSame(5, $payment->remainingCreditMonths());
+        $this->assertSame(15000, (int) $payment->monthly_unit_amount);
+        $this->assertSame(6, (int) $payment->credit_months_purchased);
+    }
+
+    public function test_update_refunded_to_paid_rejects_when_amount_not_divisible_by_current_tariff(): void
+    {
+        $user = User::factory()->create();
+        $subscription = $this->makeSubscription(['amount' => 15000]);
+
+        $payment = $this->storePaidPayment($user, $subscription, 90000);
+
+        $this->actingAs($user)->put(route('payments.update', $payment), $this->validPayload($subscription, [
+            'amount' => 90000,
+            'status' => Payment::STATUS_REFUNDED,
+            'paid_at' => '2026-10-01 12:00:00',
+        ]))->assertRedirect(route('payments.show', $payment));
+
+        $payment->refresh();
+        $this->assertSame(Payment::STATUS_REFUNDED, $payment->status);
+
+        $this->actingAs($user)->put(
+            route('subscriptions.update', $subscription),
+            [
+                'installation_id' => $subscription->installation_id,
+                'amount' => 20000,
+                'currency' => $subscription->currency,
+                'status' => $subscription->status,
+                'notes' => $subscription->notes,
+            ],
+        )->assertRedirect();
+
+        $subscription->refresh();
+
+        $auditCountBefore = AuditLog::query()->where('action', 'payment.updated')->count();
+
+        $response = $this->actingAs($user)->put(route('payments.update', $payment), $this->validPayload($subscription, [
+            'amount' => 90000,
+            'status' => Payment::STATUS_PAID,
+            'paid_at' => '2026-10-01 12:00:00',
+        ]));
+
+        $response->assertSessionHasErrors('amount');
+
+        $payment->refresh();
+
+        $this->assertSame(Payment::STATUS_REFUNDED, $payment->status);
+        $this->assertSame(90000, (int) $payment->amount);
+        $this->assertSame(15000, (int) $payment->monthly_unit_amount);
+        $this->assertSame(6, (int) $payment->credit_months_purchased);
+        $this->assertSame(0, SubscriptionPaymentConsumption::query()->count());
+        $this->assertSame($auditCountBefore, AuditLog::query()->where('action', 'payment.updated')->count());
+    }
+
     public function test_update_allows_financial_change_when_paid_without_consumption(): void
     {
         $user = User::factory()->create();
@@ -374,6 +544,19 @@ class PaymentCreditHttpTest extends TestCase
 
         $this->assertSame(45000, (int) $payment->amount);
         $this->assertSame(3, (int) $payment->credit_months_purchased);
+    }
+
+    private function storePaidPayment(User $user, Subscription $subscription, int $amount): Payment
+    {
+        $response = $this->actingAs($user)->post(route('payments.store'), $this->validPayload($subscription, [
+            'amount' => $amount,
+            'status' => Payment::STATUS_PAID,
+            'paid_at' => '2026-10-01 12:00:00',
+        ]));
+
+        $response->assertRedirect();
+
+        return Payment::query()->where('subscription_id', $subscription->id)->orderByDesc('id')->firstOrFail();
     }
 
     /**

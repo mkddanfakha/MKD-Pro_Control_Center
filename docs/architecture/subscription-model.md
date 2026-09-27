@@ -6,6 +6,7 @@ Complète [`status-lifecycle.md`](status-lifecycle.md) (séparation `Installatio
 Dernière mise à jour modèle crédit : **25/09/2026** (Tasks 89–100, doc Task 103).
 Dernière alignement doc / code (Installation ↔ Subscription ↔ Access) : **25/09/2026** (Task 147).
 Dernier alignement doc / tarif (défaut, courant, crédit historique) : **25/09/2026** (Task 183).
+Cycle **paid ↔ refunded** (HTTP, crédit, tarif) : **28/09/2026** (Tasks 199–201).
 
 ---
 
@@ -231,14 +232,124 @@ Une subscription **`terminated`** :
 - **conserve** l’historique des paiements et des consommations passées ;
 - expose **`available_months = 0`** dans les props Inertia d’affichage (`summarizeSubscriptionCreditForDisplay`), même si des lignes de paiement affichent encore un crédit théorique non consommable.
 
-### Paiement `refunded`
+### Paiement `refunded` (statut et crédit consommable)
 
-Un paiement **remboursé** :
+Un paiement **`refunded`** est un encaissement **toujours présent** dans l’historique (`payments`), avec son **`amount`** et ses champs de crédit **persistés** (`monthly_unit_amount`, `credit_months_purchased`). Ce statut décrit la **situation financière déclarée** du paiement, **pas** la suppression du dossier.
+
+Distinctions à conserver :
+
+| Notion | Comportement actuel |
+|--------|---------------------|
+| **Statut financier** (`Payment.status`, ex. `paid`, `refunded`) | Modifiable via HTTP sous conditions (voir § Cycle paid ↔ refunded) ; tracé par **`payment.updated`** (pas d’événement `payment.refunded` dédié). |
+| **Crédit consommable** | Déterminé par `SubscriptionService` (`paymentContributesToConsumableCredit`, FIFO, assertions de consommation) : **`refunded` n’est jamais consommable**, même si le calcul arithmétique « mois restants » est > 0. |
+| **Crédit déjà consommé** | Lignes **`subscription_payment_consumptions`** : **jamais** supprimées ni recalculées automatiquement lors d’un passage à `refunded`. |
+| **Historique du paiement** | Ligne `payments` conservée ; consommations et audits passés conservés. |
+| **Tarif mensuel courant** | **`subscriptions.amount`** — sert au **recalcul serveur** du crédit lors des mises à jour HTTP **sans consommation**. |
+| **Tarif mensuel historique du paiement** | **`monthly_unit_amount`** (snapshot au dernier calcul serveur accepté pour ce paiement) ; **figé** dès qu’une consommation existe (champs financiers verrouillés). |
+
+Conséquences d’un **`refunded`** :
 
 - **reste** dans l’historique ;
-- **conserve** les consommations déjà enregistrées (aucune suppression automatique) ;
+- **conserve** les consommations déjà enregistrées ;
 - **ne peut plus** alimenter une **nouvelle** consommation ;
-- **n’est pas** inclus dans `available_months` côté affichage.
+- **n’est pas** inclus dans `available_months` (agrégat consommable) ;
+- l’UI Payment Show n’affiche **pas** le mois restant arithmétique comme crédit utilisable (— + mention « non consommable »).
+
+**Non implémenté** (ne pas documenter comme existant) : remboursement automatique, annulation automatique des périodes d’abonnement, suppression du crédit ou des consommations au remboursement, conversion automatique d’un ancien crédit vers un nouveau tarif, remboursement partiel métier, restauration automatique d’une consommation.
+
+---
+
+## Cycle paid ↔ refunded
+
+Transitions gérées par **`PaymentController::update`** (et création **`store`** pour un paiement créé directement en `refunded`). Aucune modification automatique de **`subscriptions`** lors de ces seuls changements de statut paiement.
+
+Rappel : tant qu’**aucune** ligne `subscription_payment_consumptions` n’existe pour le paiement, le serveur **recalcule** `monthly_unit_amount` et `credit_months_purchased` à partir du **`amount`** soumis et du **`Subscription.amount` courant** (`resolveValidatedPaymentCreditFields` → `calculatePaymentCreditFields`). Un changement de statut **`paid` ↔ `refunded`** **n’évite pas** ce recalcul : ce n’est **pas** une simple bascule si le tarif courant ou le montant ne sont plus compatibles.
+
+### A. `paid` → `refunded` sans consommation
+
+**Autorisé** via HTTP si :
+
+- **`consumptionCount === 0`** ;
+- pas de blocage legacy **`renewal_applied_at`** sans consommation (dans ce cas le statut doit rester `paid`) ;
+- **`paid_at`** fourni (même règle que pour `paid`).
+
+**Conséquences** :
+
+- le paiement **reste** en base ;
+- **aucune** consommation n’est créée ni supprimée ;
+- le crédit devient **non consommable** (`refunded` exclu du FIFO et de `available_months`) ;
+- **aucune** période d’abonnement n’est annulée ni recalculée automatiquement ;
+- `monthly_unit_amount` / `credit_months_purchased` sont **recalculés** comme pour toute update sans consommation (souvent **inchangés** si montant et tarif courant identiques) ;
+- audit : **`payment.updated`** (`old_values` / `new_values` incluent `status`, champs crédit, etc.).
+
+**Interdit** via HTTP si **≥ 1 consommation** : le statut doit **rester `paid`** (impossible de passer en `refunded` depuis l’application).
+
+### B. `refunded` → `paid` sans consommation
+
+**Autorisé** via HTTP sous les mêmes conditions de base (0 consommation, `paid_at` obligatoire).
+
+**Conséquences** :
+
+- le paiement redevient **éligible** au crédit consommable (FIFO / consommation ciblée) si crédit restant > 0 et subscription non terminée ;
+- **`monthly_unit_amount`** et **`credit_months_purchased`** sont **recalculés** avec le **tarif courant** `Subscription.amount` et le **`amount`** du paiement ;
+- le montant du paiement doit être un **multiple entier** du tarif courant, sinon **validation refusée** (le paiement **ne change pas**) ;
+- **aucune** consommation ni avance de période **automatique** ;
+- audit : **`payment.updated`**.
+
+Cas d’usage produit : correction administrative d’un remboursement enregistré **par erreur** (sans supprimer le paiement).
+
+### C. Exemple : changement de tarif entre `refunded` et retour `paid`
+
+Scénario **documenté et couvert par les tests HTTP** (Task 200) :
+
+1. Abonnement à **15 000 FCFA** (`subscriptions.amount`).
+2. Paiement **90 000 FCFA**, statut **`paid`** → crédit calculé : **`monthly_unit_amount = 15 000`**, **`credit_months_purchased = 6`**.
+3. Passage HTTP **`paid` → `refunded`** (0 consommation) → crédit **non consommable**, champs de crédit en général **inchangés** si montant et tarif stables.
+4. Mise à jour de l’abonnement : **`Subscription.amount = 20 000`** (tarif courant).
+5. Tentative HTTP **`refunded` → `paid`** avec le **même** paiement **90 000 FCFA** (montant inchangé).
+6. **90 000** n’est **pas** divisible par **20 000** → **erreur de validation** (`amount`).
+7. Le paiement **reste `refunded`** ; **`amount`**, **`monthly_unit_amount`**, **`credit_months_purchased`** **inchangés** ; **aucune** consommation créée.
+
+Il **ne s’agit pas** d’une conversion automatique des **6 mois à 15 000** en mois à **20 000** : le retour à `paid` **exige** un recalcul compatible avec le **tarif courant**, ou une modification explicite du montant du paiement (toujours sans consommation).
+
+**Important :** changer **`Subscription.amount`** **ne recalcule pas** automatiquement les paiements déjà en base ; seules les **mises à jour HTTP** de paiement **sans consommation** relancent le calcul de crédit.
+
+### D. Cycle complet avec consommation (tarif stable)
+
+Exemple **illustratif** (tarif abonnement **15 000**, paiement **90 000**, **0 consommation** jusqu’à la reprise) :
+
+```text
+paid (6 mois achetés)
+  → refunded (0 consommation, crédit non consommable)
+  → paid (6 mois toujours disponibles arithmétiquement)
+  → consommation d’un mois (HTTP FIFO ou ciblée)
+```
+
+**Résultat attendu** :
+
+- **1** ligne **`subscription_payment_consumptions`** ;
+- **5** mois restants (`credit_months_purchased − COUNT(consumptions)`) ;
+- **`monthly_unit_amount = 15 000`**, **`credit_months_purchased = 6`** (historique du paiement inchangé sur ce scénario) ;
+- la période d’abonnement avancée **une fois** par la consommation (logique `performCreditConsumption()`).
+
+### Paiement partiellement consommé et remboursement
+
+| Canal | `paid` → `refunded` |
+|-------|---------------------|
+| **HTTP** | **Refusé** (statut verrouillé `paid`). |
+| **Base directe** (hors garde HTTP) | Possible techniquement ; les **consommations restent** ; **nouvelle** consommation **refusée** par le service. |
+
+Retour **`refunded` → `paid`** avec consommations existantes : via HTTP, seul **`paid`** est accepté comme statut si des consommations existent ; les champs financiers **ne sont pas recalculés** (`consumptionCount > 0`).
+
+### Suppression et cycle de statut
+
+La **suppression** (`PaymentController::destroy`) dépend **uniquement** de l’absence de consommations, **pas** du statut `paid` / `refunded`. Un paiement **`refunded` sans consommation** reste **supprimable** ; avec consommations, **interdit** (y compris après un cycle statutaire sans conso).
+
+### Tests de régression (HTTP)
+
+Comportement du cycle documenté ci-dessus aligné avec **`tests/Feature/PaymentCreditHttpTest.php`** (Tasks 200) : transitions `paid` ↔ `refunded`, cycle avec consommation, rejet après changement de tarif incompatible, audits `payment.updated` sur transitions réussies.
+
+---
 
 ### Concurrence
 
@@ -305,7 +416,7 @@ Installation.status ≠ Subscription.status
 |--------|----------------|
 | Historique des **paiements** (montants, statuts, crédit acheté, indicateurs legacy) | Table **`payments`**, liée à `subscription_id` |
 | Historique des **mois de crédit consommés** et périodes financées | Table **`subscription_payment_consumptions`** |
-| Historique des **évolutions** subscription / paiement / consommation | **`audit_logs`** (ex. `subscription.created`, `subscription.updated`, `subscription.lifecycle_synced`, `subscription.credit_consumed`, `subscription.credit_consumption_failed`, `payment.renewal_applied`, `payment.renewal_failed`, …) |
+| Historique des **évolutions** subscription / paiement / consommation | **`audit_logs`** (ex. `subscription.created`, `subscription.updated`, `subscription.lifecycle_synced`, `subscription.credit_consumed`, `subscription.credit_consumption_failed`, `payment.created`, **`payment.updated`** — y compris changements `paid` ↔ `refunded`, `payment.deleted`, `payment.renewal_applied`, `payment.renewal_failed`, …) |
 
 Créer une nouvelle subscription par mois **n’est pas** le modèle retenu : les mois successifs sont reflétés par l’évolution de `current_period_*`, les lignes **`payments`** (crédit acheté) et les lignes **`subscription_payment_consumptions`** (crédit utilisé).
 
@@ -444,6 +555,7 @@ Les inspections antérieures (ex. Task 36, 24/09/2026) peuvent mentionner des su
 | Accès calculé | `app/Services/InstallationAccessService.php` |
 | CRUD subscription, consommation FIFO HTTP, props crédit Show | `app/Http/Controllers/SubscriptionController.php` |
 | Paiements, calcul crédit à la création, renouvellement ciblé HTTP | `app/Http/Controllers/PaymentController.php` |
+| Tests HTTP cycle paid ↔ refunded, recalcul crédit | `tests/Feature/PaymentCreditHttpTest.php` |
 | Sync lifecycle planifié | `app/Console/Commands/SyncSubscriptionLifecycle.php` |
 | UI crédit + consommation globale | `resources/js/Pages/Subscriptions/Show.vue` |
 | UI renouvellement ciblé paiement | `resources/js/Pages/Subscriptions/Payments/Show.vue` |
