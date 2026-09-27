@@ -606,7 +606,7 @@ function paymentMethodLabel(method) {
                                     {{ remainingMonthsLabel(paymentCredit.credit_months_remaining) }}
                                 </template>
                                 <template v-else-if="paymentCredit.is_refunded">
-                                    {{ remainingMonthsLabel(paymentCredit.credit_months_remaining) }}
+                                    —
                                     <span class="mt-1 block text-xs font-normal text-gray-500">
                                         Non consommable (remboursé).
                                     </span>
