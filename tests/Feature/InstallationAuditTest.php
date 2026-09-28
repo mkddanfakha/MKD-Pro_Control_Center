@@ -7,6 +7,7 @@ use App\Models\Client;
 use App\Models\Installation;
 use App\Models\Subscription;
 use App\Models\User;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -129,6 +130,107 @@ class InstallationAuditTest extends TestCase
         $this->assertSame('suspended', $log->new_values['status']);
     }
 
+    public function test_destroy_installation_with_active_subscription_is_blocked_by_foreign_key(): void
+    {
+        $user = User::factory()->create();
+        $client = $this->makeClient();
+
+        $installation = Installation::query()->create([
+            'client_id' => $client->id,
+            'name' => 'Installation avec abonnement actif',
+            'subdomain' => 'fk-active-sub-'.uniqid(),
+            'status' => 'active',
+        ]);
+
+        Subscription::query()->create([
+            'installation_id' => $installation->id,
+            'amount' => 15000,
+            'currency' => 'XOF',
+            'status' => Subscription::STATUS_ACTIVE,
+        ]);
+
+        $this->assertInstallationDestroyIsBlockedBySubscriptionsForeignKey($user, $installation, $client);
+    }
+
+    public function test_destroy_terminated_installation_with_active_subscription_is_blocked_by_foreign_key(): void
+    {
+        $user = User::factory()->create();
+        $client = $this->makeClient();
+
+        $installation = Installation::query()->create([
+            'client_id' => $client->id,
+            'name' => 'Installation terminée avec abonnement actif',
+            'subdomain' => 'fk-term-active-sub-'.uniqid(),
+            'status' => 'terminated',
+        ]);
+
+        Subscription::query()->create([
+            'installation_id' => $installation->id,
+            'amount' => 15000,
+            'currency' => 'XOF',
+            'status' => Subscription::STATUS_ACTIVE,
+        ]);
+
+        $this->assertInstallationDestroyIsBlockedBySubscriptionsForeignKey($user, $installation, $client);
+    }
+
+    public function test_destroy_terminated_installation_with_terminated_subscription_is_blocked_by_foreign_key(): void
+    {
+        $user = User::factory()->create();
+        $client = $this->makeClient();
+
+        $installation = Installation::query()->create([
+            'client_id' => $client->id,
+            'name' => 'Installation et abonnement terminés',
+            'subdomain' => 'fk-term-term-sub-'.uniqid(),
+            'status' => 'terminated',
+        ]);
+
+        Subscription::query()->create([
+            'installation_id' => $installation->id,
+            'amount' => 15000,
+            'currency' => 'XOF',
+            'status' => Subscription::STATUS_TERMINATED,
+            'terminated_at' => '2026-09-01 00:00:00',
+        ]);
+
+        $this->assertInstallationDestroyIsBlockedBySubscriptionsForeignKey($user, $installation, $client);
+    }
+
+    public function test_destroy_installation_with_multiple_subscriptions_is_blocked_by_foreign_key(): void
+    {
+        $user = User::factory()->create();
+        $client = $this->makeClient();
+
+        $installation = Installation::query()->create([
+            'client_id' => $client->id,
+            'name' => 'Installation historique abonnements',
+            'subdomain' => 'fk-multi-sub-'.uniqid(),
+            'status' => 'active',
+        ]);
+
+        Subscription::query()->create([
+            'installation_id' => $installation->id,
+            'amount' => 10000,
+            'currency' => 'XOF',
+            'status' => Subscription::STATUS_TERMINATED,
+            'terminated_at' => '2026-06-01 00:00:00',
+        ]);
+
+        Subscription::query()->create([
+            'installation_id' => $installation->id,
+            'amount' => 15000,
+            'currency' => 'XOF',
+            'status' => Subscription::STATUS_ACTIVE,
+        ]);
+
+        $this->assertSame(2, Subscription::query()->where('installation_id', $installation->id)->count());
+
+        $this->assertInstallationDestroyIsBlockedBySubscriptionsForeignKey($user, $installation, $client);
+
+        $this->assertSame(2, Subscription::query()->where('installation_id', $installation->id)->count());
+    }
+
     public function test_installation_deletion_is_audited_without_polymorphic_reference(): void
     {
         $user = User::factory()->create();
@@ -201,5 +303,34 @@ class InstallationAuditTest extends TestCase
             'contact_name' => 'Contact Test',
             'status' => 'active',
         ]);
+    }
+
+    private function assertInstallationDestroyIsBlockedBySubscriptionsForeignKey(
+        User $user,
+        Installation $installation,
+        Client $client,
+    ): void {
+        $installationId = $installation->id;
+        $clientId = $client->id;
+        $subscriptionCount = Subscription::query()->where('installation_id', $installationId)->count();
+
+        $this->assertGreaterThan(0, $subscriptionCount);
+
+        $this->withoutExceptionHandling();
+
+        try {
+            $this->actingAs($user)->delete(route('installations.destroy', $installation));
+            $this->fail('Expected installation deletion to be blocked by subscriptions foreign key (QueryException).');
+        } catch (QueryException $exception) {
+            $this->assertNotSame('', trim($exception->getMessage()));
+        }
+
+        $this->assertDatabaseHas('installations', ['id' => $installationId]);
+        $this->assertDatabaseHas('clients', ['id' => $clientId]);
+        $this->assertSame(
+            $subscriptionCount,
+            Subscription::query()->where('installation_id', $installationId)->count(),
+        );
+        $this->assertSame(0, AuditLog::query()->where('action', 'installation.deleted')->count());
     }
 }
