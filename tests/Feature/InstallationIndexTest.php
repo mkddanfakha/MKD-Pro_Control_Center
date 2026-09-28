@@ -63,6 +63,28 @@ class InstallationIndexTest extends TestCase
                 ->where('installations.data.0.access.subscription_status', Subscription::STATUS_GRACE_PERIOD));
     }
 
+    public function test_index_reports_no_subscription_access_for_terminated_only_subscription(): void
+    {
+        $user = User::factory()->create();
+        $installation = $this->makeInstallation();
+
+        Subscription::query()->create([
+            'installation_id' => $installation->id,
+            'amount' => 15000,
+            'currency' => 'XOF',
+            'status' => Subscription::STATUS_TERMINATED,
+        ]);
+
+        $this->actingAs($user)
+            ->get(route('installations.index'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('installations.data.0.id', $installation->id)
+                ->where('installations.data.0.access.accessible', false)
+                ->where('installations.data.0.access.status', 'no_subscription')
+                ->where('installations.data.0.access.subscription_status', null));
+    }
+
     /**
      * @param  array<string, mixed>  $attributes
      */

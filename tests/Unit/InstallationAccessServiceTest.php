@@ -61,6 +61,12 @@ class InstallationAccessServiceTest extends TestCase
         $this->assertFalse($this->service->isAccessible($installation));
         $this->assertSame('no_subscription', $this->service->accessStatus($installation));
         $this->assertNull($this->service->latestSubscription($installation));
+
+        $summary = $this->service->accessSummary($installation);
+        $this->assertFalse($summary['accessible']);
+        $this->assertSame('no_subscription', $summary['status']);
+        $this->assertNull($summary['subscription_status']);
+
         $this->assertInstallationUnchangedAfterAccessCheck($installation);
     }
 
@@ -127,9 +133,18 @@ class InstallationAccessServiceTest extends TestCase
 
         $installation = $installation->fresh();
 
-        $this->assertSame(Subscription::STATUS_ACTIVE, $this->service->latestSubscription($installation)?->status);
+        $current = $this->service->latestSubscription($installation);
+
+        $this->assertNotNull($current);
+        $this->assertSame(Subscription::STATUS_ACTIVE, $current->status);
         $this->assertTrue($this->service->isAccessible($installation));
         $this->assertSame('accessible', $this->service->accessStatus($installation));
+
+        $summary = $this->service->accessSummary($installation);
+        $this->assertTrue($summary['accessible']);
+        $this->assertSame('accessible', $summary['status']);
+        $this->assertSame(Subscription::STATUS_ACTIVE, $summary['subscription_status']);
+
         $this->assertInstallationUnchangedAfterAccessCheck($installation);
     }
 
@@ -185,25 +200,36 @@ class InstallationAccessServiceTest extends TestCase
     {
         $installation = $this->makeInstallation();
 
-        Subscription::query()->create([
+        $active = Subscription::query()->create([
             'installation_id' => $installation->id,
             'amount' => 15000,
             'currency' => 'XOF',
             'status' => Subscription::STATUS_ACTIVE,
         ]);
 
-        Subscription::query()->create([
+        $terminated = Subscription::query()->create([
             'installation_id' => $installation->id,
             'amount' => 15000,
             'currency' => 'XOF',
             'status' => Subscription::STATUS_TERMINATED,
         ]);
 
+        $this->assertTrue($terminated->id > $active->id);
+
         $installation = $installation->fresh();
 
-        $this->assertSame(Subscription::STATUS_ACTIVE, $this->service->latestSubscription($installation)?->status);
+        $current = $this->service->latestSubscription($installation);
+
+        $this->assertNotNull($current);
+        $this->assertSame($active->id, $current->id);
+        $this->assertSame(Subscription::STATUS_ACTIVE, $current->status);
         $this->assertTrue($this->service->isAccessible($installation));
         $this->assertSame('accessible', $this->service->accessStatus($installation));
+
+        $summary = $this->service->accessSummary($installation);
+        $this->assertTrue($summary['accessible']);
+        $this->assertSame('accessible', $summary['status']);
+        $this->assertSame(Subscription::STATUS_ACTIVE, $summary['subscription_status']);
     }
 
     private function makeInstallation(): Installation

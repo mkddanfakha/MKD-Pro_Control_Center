@@ -242,6 +242,40 @@ class InstallationShowOperationalTest extends TestCase
                 ->where('access.status', 'no_subscription'));
     }
 
+    public function test_show_includes_payments_summary_for_terminated_subscription_history(): void
+    {
+        $user = User::factory()->create();
+        $installation = $this->makeInstallation();
+
+        $terminated = Subscription::query()->create([
+            'installation_id' => $installation->id,
+            'amount' => 15000,
+            'currency' => 'XOF',
+            'status' => Subscription::STATUS_TERMINATED,
+        ]);
+
+        $payment = Payment::query()->create([
+            'subscription_id' => $terminated->id,
+            'amount' => 45000,
+            'currency' => 'XOF',
+            'status' => Payment::STATUS_PAID,
+            'paid_at' => '2026-10-15 12:00:00',
+            'monthly_unit_amount' => 15000,
+            'credit_months_purchased' => 3,
+        ]);
+
+        $this->actingAs($user)
+            ->get(route('installations.show', $installation))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('lastSubscription', null)
+                ->where('credit', null)
+                ->where('access.status', 'no_subscription')
+                ->where('paymentsSummary.count', 1)
+                ->where('paymentsSummary.last_payment.id', $payment->id)
+                ->where('paymentsSummary.last_payment.amount', 45000));
+    }
+
     public function test_show_does_not_trigger_obvious_n_plus_one(): void
     {
         $user = User::factory()->create();
