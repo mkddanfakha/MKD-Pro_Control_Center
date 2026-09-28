@@ -1,159 +1,222 @@
 # Scheduler Laravel en production — MKD-Pro Control Center
 
-Documentation d’exploitation pour la synchronisation planifiée du cycle de vie des abonnements.  
-**Aucune configuration cron n’est appliquée par ce document** : il décrit l’état du code et ce qui restera à faire côté serveur.
+Documentation d’exploitation pour la synchronisation planifiée du cycle de vie des abonnements (`active` → `grace_period` → `suspended` via `SubscriptionService::syncLifecycle()`).
+
+**Ce dépôt Git ne configure aucun cron sur un serveur réel.** Il décrit le code applicatif et la procédure d’infrastructure à mettre en place en production (notamment sur un hébergement mutualisé type o2switch).
 
 ---
 
-## 1. Commande métier planifiée
+## A. Ce que fait Laravel (dans le code)
 
-Le Control Center enregistre la tâche suivante :
+Le Control Center **enregistre** une tâche planifiée dans `routes/console.php` :
+
+```php
+Schedule::command('subscriptions:sync-lifecycle')->daily();
+```
+
+Cela signifie que Laravel **sait quand** la commande `subscriptions:sync-lifecycle` doit être exécutée : **une fois par jour** à **00:00** dans le fuseau `config('app.timezone')` (équivalent cron `0 0 * * *`).
+
+Le fichier `routes/console.php` est chargé au démarrage de l’application via `bootstrap/app.php` (`commands: __DIR__.'/../routes/console.php'`).
+
+La commande métier :
 
 ```bash
 php artisan subscriptions:sync-lifecycle
 ```
 
-Cette commande orchestre l’appel à `SubscriptionService::syncLifecycle()` pour les abonnements concernés (voir section 7).
+orchestre l’appel à `SubscriptionService::syncLifecycle()` pour les abonnements en statut `active` ou `grace_period` (voir section 7).
 
-La planification est définie dans le code :
-
-```php
-// routes/console.php
-Schedule::command('subscriptions:sync-lifecycle')->daily();
-```
+**Important :** définir `->daily()` dans le code **ne lance pas** la commande automatiquement. Laravel attend qu’un processus externe invoque le scheduler (section B).
 
 ---
 
-## 2. Fréquence Laravel actuelle
+## B. Ce que doit faire le serveur de production
 
-| Aspect | Détail |
-|--------|--------|
-| **Fréquence** | **Quotidienne** (`->daily()`), expression cron équivalente `0 0 * * *` (minuit). |
-| **Fuseau horaire** | Les heures d’exécution du scheduler Laravel suivent **`config('app.timezone')`**. |
-| **Valeur dans le dépôt** | Dans `config/app.php` : `'timezone' => 'UTC'` (valeur par défaut du fichier de configuration, **non modifiée** par cette documentation). |
-| **Production** | Un fichier `.env` peut définir `APP_TIMEZONE` ; sans l’éditer ici, retenir que l’heure « minuit » planifiée est **minuit dans le fuseau effectivement chargé** au runtime (`php artisan schedule:list` affiche « Next Due » selon ce fuseau). |
-
-Vérification locale typique :
-
-```bash
-php artisan schedule:list
-```
-
-Exemple de sortie attendue (libellés selon locale CLI) :
-
-```text
-0 0 * * * php artisan subscriptions:sync-lifecycle
-```
-
----
-
-## 3. Mécanisme Laravel Scheduler
-
-Laravel **ne lance pas** le scheduler en arrière-plan de lui-même. Il **enregistre** des tâches ; c’est l’environnement d’exécution qui doit **interroger** le scheduler régulièrement.
-
-En production, le serveur (ou un orchestrateur) doit exécuter **au minimum une fois par minute** :
+En production, le serveur (cron système, panel hébergeur, systemd timer, etc.) doit exécuter **régulièrement** :
 
 ```bash
 php artisan schedule:run
 ```
 
-`schedule:run` évalue quelles tâches sont dues **à cette minute** et lance celles qui le sont (ici, une fois par jour à 00:00 dans le fuseau applicatif).
-
-Sans cet appel périodique, **`subscriptions:sync-lifecycle` ne s’exécutera pas**, même si `routes/console.php` contient `->daily()`.
-
----
-
-## 4. Configuration serveur attendue (documentation uniquement)
-
-Lors d’une future mise en production, il faudra configurer un **cron système** (ou équivalent : systemd timer, panel hébergeur, CI scheduler) qui invoque `schedule:run` **chaque minute**.
-
-Exemple **documentaire** (chemin fictif — **ne pas utiliser tel quel**) :
+**Méthode classique :** une entrée **cron système** qui s’exécute **chaque minute** depuis la racine du projet :
 
 ```cron
 * * * * * cd /chemin/vers/MKD-Pro_Control_Center && php artisan schedule:run >> /dev/null 2>&1
 ```
 
-Points à adapter **ultérieurement** sur le vrai serveur :
+Remplacez `/chemin/vers/MKD-Pro_Control_Center` par le chemin absolu réel sur le serveur (placeholder documentaire — **ne pas** réutiliser un chemin Windows ou un chemin inventé pour o2switch).
 
-- chemin absolu du projet ;
-- binaire PHP CLI (`php` ou chemin complet) ;
-- utilisateur système sous lequel tourne le cron (permissions fichiers, `.env`) ;
-- redirection des logs (`>> /var/log/...` plutôt que `/dev/null` en prod si traçabilité requise).
+Points à adapter sur le serveur :
 
-**Cette étape de documentation ne configure aucun cron réel.**
+- chemin absolu du dépôt ;
+- binaire PHP CLI (`php` ou chemin complet fourni par l’hébergeur) ;
+- utilisateur sous lequel tourne le cron (permissions `.env`, `storage/`) ;
+- redirection des logs en production (`>> /var/log/...` plutôt que `/dev/null` si traçabilité requise).
+
+Tant qu’**aucun** mécanisme n’appelle `schedule:run` chaque minute, **`subscriptions:sync-lifecycle` ne s’exécutera pas**, même si `routes/console.php` contient `->daily()`.
 
 ---
 
-## 5. Commande de vérification
+## C. `schedule:run` n’est pas un service qui reste actif
 
-Lister les tâches enregistrées et la prochaine échéance :
+```bash
+php artisan schedule:run
+```
+
+est une **exécution ponctuelle** : Laravel vérifie quelles tâches sont **dues à cette minute**, lance celles qui le sont, puis **se termine**.
+
+Ce n’est **pas** un daemon à laisser tourner en continu. C’est le **cron système** (ou équivalent) qui doit **relancer** `schedule:run` **chaque minute**.
+
+Ne pas confondre :
+
+| Commande | Rôle |
+|----------|------|
+| `php artisan schedule:run` | Vérification **ponctuelle** du scheduler (à répéter chaque minute via cron) |
+| `php artisan subscriptions:sync-lifecycle` | **Synchronisation métier** du cycle de vie (planifiée **une fois par jour** via `->daily()`) |
+
+---
+
+## D. Fréquence réelle (chaîne complète)
+
+Le lifecycle **n’est pas** exécuté chaque minute. Laravel **vérifie** chaque minute ; la commande lifecycle n’est **due qu’une fois par jour**.
+
+```text
+cron système (* * * * *)
+    ↓
+php artisan schedule:run   (chaque minute, exécution ponctuelle)
+    ↓
+Laravel évalue les tâches enregistrées
+    ↓
+subscriptions:sync-lifecycle   (uniquement quand l’heure planifiée est atteinte)
+    ↓
+Schedule::command(...)->daily()   (typiquement 00:00, fuseau applicatif)
+    ↓
+SubscriptionService::syncLifecycle()   (par abonnement éligible)
+```
+
+Mécanisme retenu par le projet (sans job ni queue dédiée) :
+
+```text
+scheduler Laravel
+    ↓
+subscriptions:sync-lifecycle
+    ↓
+SubscriptionService::syncLifecycle()
+```
+
+Aucun déclenchement depuis les contrôleurs HTTP admin : consulter le back-office **ne** synchronise **pas** le lifecycle.
+
+---
+
+## Configuration du cron en production (hébergement mutualisé / o2switch)
+
+MKD-Pro Control Center est prévu pour un déploiement sur **o2switch** (ou hébergeur équivalent). **Ce dépôt ne contient pas** une capture d’écran ni une validation de l’interface actuelle du panel o2switch ; la procédure ci-dessous reste **générique**.
+
+1. **Créer une tâche cron** dans le panel d’administration de l’hébergeur (ou via SSH crontab selon l’offre).
+2. **Fréquence :** chaque minute (`* * * * *`).
+3. **Commande :** exécuter `php artisan schedule:run` depuis la **racine** de l’application déployée, par exemple :
+
+   ```bash
+   cd /chemin/vers/MKD-Pro_Control_Center && php artisan schedule:run
+   ```
+
+   Utiliser le chemin absolu Linux indiqué par l’hébergeur pour le compte et le répertoire du site.
+
+4. **Ne pas** planifier `subscriptions:sync-lifecycle` directement dans le cron à la place de `schedule:run` : Laravel centralise toutes les tâches planifiées via `schedule:run` ; ajouter d’autres `Schedule::` dans le futur resterait cohérent.
+
+5. **Après configuration :** suivre la section « Vérification production » ci-dessous.
+
+---
+
+## Vérification production
+
+Checklist pour confirmer que le déclenchement automatique est **enregistré dans le code** et que le **serveur** exécute bien le scheduler.
+
+### 1. Le scheduler connaît la tâche
 
 ```bash
 php artisan schedule:list
 ```
 
-Options utiles (Laravel) : `--timezone=`, `--next`, `--json` (selon version).
+Résultat attendu (libellés selon locale CLI) : une ligne du type :
 
----
-
-## 6. Commande métier manuelle
-
-Un administrateur peut lancer la synchronisation **hors planification** (maintenance, test après déploiement) :
-
-```bash
-php artisan subscriptions:sync-lifecycle
+```text
+0 0 * * * php artisan subscriptions:sync-lifecycle
 ```
 
-Options globales Artisan :
+avec une indication « Next Due » cohérente avec le fuseau (`php artisan about` ou `config('app.timezone')`).
 
-- `-q` / `--quiet` : masque le détail par abonnement, affiche le résumé ;
-- code de sortie `0` si aucune erreur sur un abonnement, `1` si au moins une erreur a été comptée.
-
-Aide :
+### 2. La commande existe
 
 ```bash
 php artisan subscriptions:sync-lifecycle --help
 ```
 
+Doit afficher la description : synchronisation du cycle de vie des abonnements actifs et en période de grâce.
+
+### 3. Exécution manuelle (diagnostic ou rattrapage uniquement)
+
+```bash
+php artisan subscriptions:sync-lifecycle
+```
+
+**Ne pas** présenter cette commande comme devant être lancée **manuellement tous les jours** en production normale. L’exécution automatique quotidienne passe par **cron → `schedule:run` → `->daily()`**. L’appel manuel sert au **diagnostic**, après déploiement sur staging, ou **rattrapage** si une fenêtre planifiée a été manquée.
+
+Options utiles : `-q` / `--quiet` (résumé seul) ; code de sortie `0` si aucune erreur par abonnement, `1` si au moins une erreur.
+
+### 4. Le serveur exécute bien le scheduler
+
+Sur le serveur de production, vérifier que le cron (ou timer) appelle **`php artisan schedule:run`** chaque minute — par exemple via les logs cron de l’hébergeur, un fichier de log dédié, ou un test contrôlé à une minute où une tâche test est due.
+
+**Note :** exécuter `schedule:run` une fois à la main en SSH **prouve** que la commande fonctionne ; cela **ne remplace pas** le cron minute par minute pour les jours suivants.
+
 ---
 
-## 7. Comportement de `subscriptions:sync-lifecycle`
+## Fréquence Laravel (référence)
 
-Rappel du comportement implémenté (couche orchestration uniquement) :
+| Aspect | Détail |
+|--------|--------|
+| **Fréquence lifecycle** | **Quotidienne** (`->daily()`), cron `0 0 * * *`. |
+| **Fuseau horaire** | `config('app.timezone')` / variable d’environnement `APP_TIMEZONE`. |
+| **Valeur par défaut dans le dépôt** | `config/app.php` : `UTC` (sauf surcharge `.env`). |
+
+---
+
+## Comportement de `subscriptions:sync-lifecycle`
 
 | Règle | Détail |
 |-------|--------|
 | **Abonnements traités** | Statuts `active` et `grace_period` uniquement. |
-| **Ignorés** | `suspended`, `terminated` (non chargés inutilement pour ce traitement). |
-| **Erreurs** | Une `SubscriptionLifecycleException` (ou autre erreur) sur un abonnement **n’arrête pas** le lot ; compteur d’erreurs + message ; les autres abonnements continuent. |
+| **Ignorés** | `suspended`, `terminated`. |
+| **Erreurs** | Une erreur sur un abonnement **n’arrête pas** le lot ; compteur + audit ; les autres continuent. |
 | **Code retour** | `SUCCESS` si zéro erreur ; `FAILURE` si au moins une erreur. |
-| **Idempotence** | Repasser sur le même état (ex. déjà en `grace_period` sans nouvelle échéance) ne provoque pas de transition incohérente ; le service lifecycle est conçu pour être rejouable. |
-| **Volume** | Traitement par paquets (`chunkById`) pour limiter la mémoire. |
+| **Idempotence** | Rejouable sans transition incohérente (logique dans le service). |
+| **Volume** | `chunkById(100)`. |
 
-La logique métier des transitions reste dans **`SubscriptionService::syncLifecycle()`** ; la commande ne duplique pas les règles de verrouillage (`lockForUpdate` côté service).
-
----
-
-## 8. Déploiement actuel
-
-> **Le scheduler Laravel est configuré dans le code**, via `Schedule::command('subscriptions:sync-lifecycle')->daily()` dans `routes/console.php`, **mais aucun cron de production n’est configuré par cette étape** (ni par ce dépôt documentation seul).
-
-Tant qu’aucun mécanisme n’appelle `php artisan schedule:run` chaque minute en production, la planification quotidienne **n’a pas d’effet** sur l’environnement concerné.
+La logique des transitions reste dans **`SubscriptionService::syncLifecycle()`** ; la commande ne duplique pas les règles de verrouillage (`lockForUpdate` côté service).
 
 ---
 
-## 9. Procédure future (checklist ops)
+## Déploiement et limites du dépôt Git
 
-À réaliser **ultérieurement**, hors scope de la simple documentation :
+| Élément | État |
+|---------|------|
+| Planification dans le code | Oui — `routes/console.php` |
+| Cron serveur versionné | **Non** — configuration **infrastructure**, hors dépôt |
+| Garantie d’exécution automatique | **Non** — dépend du cron / panel sur le serveur de production |
 
-1. **Choisir l’environnement de production** (serveur, panel, conteneur, etc.).
-2. **Déterminer le chemin réel** du dépôt MKD-Pro Control Center sur ce serveur.
-3. **Vérifier PHP CLI** : `php -v`, `php artisan --version` depuis ce chemin, extensions requises (DB, etc.).
-4. **Vérifier le fuseau** effectif : `config('app.timezone')` / `APP_TIMEZONE` pour comprendre à quelle heure locale tombe le `0 0 * * *`.
-5. **Configurer le cron** (ou alternative) : une entrée `* * * * *` → `schedule:run`.
-6. **Vérifier l’enregistrement** : `php artisan schedule:list`.
-7. **Vérifier les exécutions** : logs Laravel (`storage/logs`), sortie cron, monitoring éventuel du code retour de la commande métier.
-8. **Test contrôlé** : exécution manuelle `subscriptions:sync-lifecycle` sur staging ; puis attendre une fenêtre planifiée ou utiliser `php artisan schedule:test` (si disponible sur la version Laravel) selon les pratiques de l’équipe.
+---
+
+## Checklist ops (mise en production)
+
+1. Choisir l’environnement (serveur, panel o2switch, conteneur, etc.).
+2. Déterminer le chemin réel : `/chemin/vers/MKD-Pro_Control_Center` sur le serveur Linux.
+3. Vérifier PHP CLI : `php -v`, `php artisan --version` depuis ce répertoire.
+4. Vérifier le fuseau effectif pour l’heure du `daily()`.
+5. Configurer le cron **chaque minute** → `schedule:run`.
+6. `php artisan schedule:list` sur le serveur.
+7. Surveiller logs Laravel / cron / code retour de la commande métier.
+8. Test contrôlé : `subscriptions:sync-lifecycle` sur staging ; optionnel `php artisan schedule:test` selon la version Laravel et les pratiques de l’équipe.
 
 ---
 
@@ -162,13 +225,14 @@ Tant qu’aucun mécanisme n’appelle `php artisan schedule:run` chaque minute 
 | Élément | Fichier |
 |---------|---------|
 | Planification | `routes/console.php` |
+| Chargement console | `bootstrap/app.php` |
 | Commande | `app/Console/Commands/SyncSubscriptionLifecycle.php` |
-| Cycle de vie | `app/Services/SubscriptionService.php` |
-| Fuseau par défaut (config) | `config/app.php` → `timezone` |
+| Cycle de vie (métier) | `app/Services/SubscriptionService.php` |
+| Fuseau par défaut | `config/app.php` → `timezone` |
 | Statuts installation vs abonnement | `docs/architecture/status-lifecycle.md` |
 
 ---
 
 ## Périmètre
 
-Ce document est **purement opérationnel / informatif**. Il ne modifie pas le code, `.env`, cron serveur, base de données ni applications MKD-Pro Gestion clientes.
+Ce document est **opérationnel / informatif**. Il ne modifie pas le code métier du lifecycle, `.env`, cron serveur, base de données ni applications MKD-Pro Gestion clientes.
