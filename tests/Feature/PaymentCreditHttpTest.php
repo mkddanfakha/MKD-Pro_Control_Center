@@ -122,6 +122,93 @@ class PaymentCreditHttpTest extends TestCase
         $this->assertSame($countBefore, Payment::query()->count());
     }
 
+    public function test_store_allows_paid_payment_on_terminated_subscription(): void
+    {
+        $user = User::factory()->create();
+        $subscription = $this->makeSubscription([
+            'status' => Subscription::STATUS_TERMINATED,
+            'terminated_at' => '2026-10-01 00:00:00',
+        ]);
+
+        $response = $this->actingAs($user)->post(route('payments.store'), $this->validPayload($subscription, [
+            'amount' => 45000,
+            'status' => Payment::STATUS_PAID,
+            'paid_at' => '2026-10-15 12:00:00',
+        ]));
+
+        $response->assertRedirect();
+
+        $payment = Payment::query()->where('subscription_id', $subscription->id)->sole();
+
+        $this->assertSame($subscription->id, (int) $payment->subscription_id);
+        $this->assertSame(Payment::STATUS_PAID, $payment->status);
+        $this->assertSame(45000, (int) $payment->amount);
+        $this->assertSame('XOF', $payment->currency);
+        $this->assertSame(15000, (int) $payment->monthly_unit_amount);
+        $this->assertSame(3, (int) $payment->credit_months_purchased);
+        $this->assertSame(Subscription::STATUS_TERMINATED, $subscription->fresh()->status);
+    }
+
+    public function test_store_allows_pending_payment_on_terminated_subscription(): void
+    {
+        $user = User::factory()->create();
+        $subscription = $this->makeSubscription([
+            'status' => Subscription::STATUS_TERMINATED,
+            'terminated_at' => '2026-10-01 00:00:00',
+        ]);
+
+        $response = $this->actingAs($user)->post(route('payments.store'), $this->validPayload($subscription, [
+            'amount' => 15000,
+            'status' => Payment::STATUS_PENDING,
+        ]));
+
+        $response->assertRedirect();
+
+        $payment = Payment::query()->where('subscription_id', $subscription->id)->sole();
+
+        $this->assertSame(Payment::STATUS_PENDING, $payment->status);
+        $this->assertNull($payment->paid_at);
+        $this->assertSame(15000, (int) $payment->monthly_unit_amount);
+        $this->assertSame(1, (int) $payment->credit_months_purchased);
+    }
+
+    public function test_update_allows_change_on_payment_linked_to_terminated_subscription_without_consumption(): void
+    {
+        $user = User::factory()->create();
+        $subscription = $this->makeSubscription([
+            'status' => Subscription::STATUS_TERMINATED,
+            'terminated_at' => '2026-10-01 00:00:00',
+        ]);
+
+        $payment = Payment::query()->create([
+            'subscription_id' => $subscription->id,
+            'amount' => 15000,
+            'currency' => 'XOF',
+            'status' => Payment::STATUS_PENDING,
+            'monthly_unit_amount' => 15000,
+            'credit_months_purchased' => 1,
+            'notes' => 'Avant modification',
+        ]);
+
+        $response = $this->actingAs($user)->put(route('payments.update', $payment), $this->validPayload($subscription, [
+            'amount' => 45000,
+            'status' => Payment::STATUS_PAID,
+            'paid_at' => '2026-10-15 12:00:00',
+            'notes' => 'Après modification sur abonnement terminé',
+        ]));
+
+        $response->assertRedirect(route('payments.show', $payment));
+
+        $payment->refresh();
+
+        $this->assertSame(Payment::STATUS_PAID, $payment->status);
+        $this->assertSame(45000, (int) $payment->amount);
+        $this->assertSame(3, (int) $payment->credit_months_purchased);
+        $this->assertSame('Après modification sur abonnement terminé', $payment->notes);
+        $this->assertSame(Subscription::STATUS_TERMINATED, $subscription->fresh()->status);
+        $this->assertSame(0, SubscriptionPaymentConsumption::query()->where('payment_id', $payment->id)->count());
+    }
+
     public function test_pending_payment_update_after_subscription_price_change_uses_current_tariff_for_recalculation(): void
     {
         $user = User::factory()->create();

@@ -136,6 +136,51 @@ class PaymentDestroyConsumptionGuardTest extends TestCase
         $this->assertInertiaPaymentErrorPropFromSessionValidationErrors($paymentErrorMessage);
     }
 
+    public function test_destroy_succeeds_for_terminated_subscription_payment_without_consumption(): void
+    {
+        $user = User::factory()->create();
+        $subscription = $this->makeSubscription([
+            'status' => Subscription::STATUS_TERMINATED,
+            'terminated_at' => '2026-10-01 00:00:00',
+        ]);
+        $payment = $this->makePaidPayment($subscription);
+        $paymentId = $payment->id;
+
+        $response = $this->actingAs($user)->delete(route('payments.destroy', $payment));
+
+        $response->assertRedirect(route('payments.index'));
+        $this->assertDatabaseMissing('payments', ['id' => $paymentId]);
+        $this->assertSame(1, AuditLog::query()->where('action', 'payment.deleted')->count());
+        $this->assertSame(Subscription::STATUS_TERMINATED, $subscription->fresh()->status);
+    }
+
+    public function test_destroy_rejects_consumed_payment_on_terminated_subscription(): void
+    {
+        $user = User::factory()->create();
+        $subscription = $this->makeSubscription([
+            'status' => Subscription::STATUS_TERMINATED,
+            'terminated_at' => '2026-10-01 00:00:00',
+        ]);
+        $payment = $this->makePaidPayment($subscription);
+
+        SubscriptionPaymentConsumption::query()->create([
+            'payment_id' => $payment->id,
+            'subscription_id' => $subscription->id,
+            'period_start' => '2026-10-01 00:00:00',
+            'period_end' => '2026-10-31 23:59:59',
+            'consumed_at' => '2026-10-05 10:00:00',
+        ]);
+
+        $response = $this->actingAs($user)->delete(route('payments.destroy', $payment));
+
+        $response->assertSessionHasErrors([
+            'payment' => 'Ce paiement ne peut pas être supprimé car son crédit a déjà été consommé.',
+        ]);
+        $this->assertDatabaseHas('payments', ['id' => $payment->id]);
+        $this->assertSame(1, SubscriptionPaymentConsumption::query()->where('payment_id', $payment->id)->count());
+        $this->assertSame(0, AuditLog::query()->where('action', 'payment.deleted')->count());
+    }
+
     public function test_destroy_allows_paid_payment_without_consumption(): void
     {
         $user = User::factory()->create();

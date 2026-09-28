@@ -157,6 +157,43 @@ class PaymentRenewalTest extends TestCase
         $this->service->renewFromPayment($payment);
     }
 
+    public function test_renew_subscription_route_rejects_terminated_subscription(): void
+    {
+        $user = User::factory()->create();
+
+        $subscription = $this->makeSubscription([
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+            'status' => Subscription::STATUS_TERMINATED,
+            'terminated_at' => '2026-10-01 00:00:00',
+        ]);
+
+        $payment = $this->makePayment($subscription, [
+            'amount' => 45000,
+            'status' => Payment::STATUS_PAID,
+        ]);
+
+        $periodStartBefore = $subscription->current_period_start->format('Y-m-d H:i:s');
+        $periodEndBefore = $subscription->current_period_end->format('Y-m-d H:i:s');
+
+        $response = $this->actingAs($user)->post(route('payments.renew-subscription', $payment));
+
+        $response->assertRedirect(route('payments.show', $payment));
+        $response->assertSessionHas(
+            'error',
+            'Impossible de renouveler un abonnement terminé.',
+        );
+
+        $subscription->refresh();
+        $payment->refresh();
+
+        $this->assertSame($periodStartBefore, $subscription->current_period_start->format('Y-m-d H:i:s'));
+        $this->assertSame($periodEndBefore, $subscription->current_period_end->format('Y-m-d H:i:s'));
+        $this->assertSame(0, SubscriptionPaymentConsumption::query()->count());
+        $this->assertSame(1, AuditLog::query()->where('action', 'payment.renewal_failed')->count());
+        $this->assertSame(0, AuditLog::query()->where('action', 'payment.renewal_applied')->count());
+    }
+
     public function test_renew_subscription_route_requires_authentication(): void
     {
         $subscription = $this->makeSubscription([
