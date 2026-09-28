@@ -150,6 +150,71 @@ class InstallationShowAccessTest extends TestCase
                 ->where('lastSubscription', null));
     }
 
+    public function test_show_terminated_installation_with_active_subscription_and_valid_period_marks_access_accessible(): void
+    {
+        $this->travelTo('2026-10-15 12:00:00');
+
+        $user = User::factory()->create();
+        $installation = $this->makeInstallation(['status' => 'terminated']);
+
+        Subscription::query()->create([
+            'installation_id' => $installation->id,
+            'amount' => 15000,
+            'currency' => 'XOF',
+            'status' => Subscription::STATUS_ACTIVE,
+            'starts_at' => '2026-10-01 00:00:00',
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        $this->actingAs($user)
+            ->get(route('installations.show', $installation))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Installations/Show')
+                ->where('installation.status', 'terminated')
+                ->where('access.accessible', true)
+                ->where('access.status', 'accessible')
+                ->where('access.subscription_status', Subscription::STATUS_ACTIVE)
+                ->has('lastSubscription')
+                ->where('lastSubscription.status', Subscription::STATUS_ACTIVE));
+    }
+
+    public function test_show_terminated_installation_uses_active_subscription_when_terminated_subscription_is_historical(): void
+    {
+        $this->travelTo('2026-10-15 12:00:00');
+
+        $user = User::factory()->create();
+        $installation = $this->makeInstallation(['status' => 'terminated']);
+
+        Subscription::query()->create([
+            'installation_id' => $installation->id,
+            'amount' => 10000,
+            'currency' => 'XOF',
+            'status' => Subscription::STATUS_TERMINATED,
+        ]);
+
+        Subscription::query()->create([
+            'installation_id' => $installation->id,
+            'amount' => 15000,
+            'currency' => 'XOF',
+            'status' => Subscription::STATUS_ACTIVE,
+            'starts_at' => '2026-10-01 00:00:00',
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        $this->actingAs($user)
+            ->get(route('installations.show', $installation))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('installation.status', 'terminated')
+                ->where('access.accessible', true)
+                ->where('access.status', 'accessible')
+                ->where('access.subscription_status', Subscription::STATUS_ACTIVE)
+                ->where('lastSubscription.status', Subscription::STATUS_ACTIVE));
+    }
+
     public function test_show_preserves_installation_status_when_subscription_is_active(): void
     {
         $user = User::factory()->create();
