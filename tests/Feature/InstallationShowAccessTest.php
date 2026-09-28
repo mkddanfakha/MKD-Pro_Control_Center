@@ -4,8 +4,11 @@ namespace Tests\Feature;
 
 use App\Models\Client;
 use App\Models\Installation;
+use App\Models\Payment;
 use App\Models\Subscription;
 use App\Models\User;
+use App\Services\InstallationAccessService;
+use App\Services\SubscriptionService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
@@ -63,6 +66,49 @@ class InstallationShowAccessTest extends TestCase
             ->assertInertia(fn (Assert $page) => $page
                 ->where('access.accessible', false)
                 ->where('access.status', 'suspended'));
+    }
+
+    public function test_installation_access_becomes_accessible_after_credit_consumption_reactivates_suspended_subscription(): void
+    {
+        $installation = $this->makeInstallationWithSubscription([
+            'status' => Subscription::STATUS_SUSPENDED,
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+            'grace_period_ends_at' => '2026-11-07 23:59:59',
+            'suspended_at' => '2026-11-08 08:00:00',
+        ]);
+
+        $subscription = Subscription::query()
+            ->where('installation_id', $installation->id)
+            ->firstOrFail();
+
+        $payment = Payment::query()->create([
+            'subscription_id' => $subscription->id,
+            'amount' => 15000,
+            'currency' => 'XOF',
+            'status' => Payment::STATUS_PAID,
+            'paid_at' => '2026-10-15 12:00:00',
+            'monthly_unit_amount' => 15000,
+            'credit_months_purchased' => 1,
+        ]);
+
+        $accessService = app(InstallationAccessService::class);
+        $subscriptionService = app(SubscriptionService::class);
+
+        $installationForAccess = $installation->fresh(['subscriptions']);
+
+        $this->assertFalse($accessService->isAccessible($installationForAccess));
+        $this->assertSame('suspended', $accessService->accessStatus($installationForAccess));
+
+        $subscriptionService->consumeCreditFromPayment($payment);
+
+        $subscription->refresh();
+        $installationForAccess = $installation->fresh(['subscriptions']);
+
+        $this->assertSame(Subscription::STATUS_ACTIVE, $subscription->status);
+        $this->assertNull($subscription->suspended_at);
+        $this->assertTrue($accessService->isAccessible($installationForAccess));
+        $this->assertSame('accessible', $accessService->accessStatus($installationForAccess));
     }
 
     public function test_show_includes_terminated_access_state(): void
