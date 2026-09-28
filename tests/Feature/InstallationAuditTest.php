@@ -5,6 +5,8 @@ namespace Tests\Feature;
 use App\Models\AuditLog;
 use App\Models\Client;
 use App\Models\Installation;
+use App\Models\InstallationModule;
+use App\Models\Module;
 use App\Models\Subscription;
 use App\Models\User;
 use Illuminate\Database\QueryException;
@@ -231,6 +233,99 @@ class InstallationAuditTest extends TestCase
         $this->assertSame(2, Subscription::query()->where('installation_id', $installation->id)->count());
     }
 
+    public function test_destroy_installation_with_installation_module_is_blocked_by_foreign_key(): void
+    {
+        $user = User::factory()->create();
+        $client = $this->makeClient();
+
+        $installation = Installation::query()->create([
+            'client_id' => $client->id,
+            'name' => 'Installation avec module',
+            'subdomain' => 'fk-module-'.uniqid(),
+            'status' => 'active',
+        ]);
+
+        $module = $this->makeModule();
+        $installationModule = InstallationModule::query()->create([
+            'installation_id' => $installation->id,
+            'module_id' => $module->id,
+            'status' => InstallationModule::STATUS_ACTIVE,
+        ]);
+
+        $this->assertSame(0, Subscription::query()->where('installation_id', $installation->id)->count());
+
+        $this->assertInstallationDestroyIsBlockedByInstallationModulesForeignKey(
+            $user,
+            $installation,
+            $client,
+            $module,
+            $installationModule,
+        );
+    }
+
+    public function test_destroy_terminated_installation_with_installation_module_is_blocked_by_foreign_key(): void
+    {
+        $user = User::factory()->create();
+        $client = $this->makeClient();
+
+        $installation = Installation::query()->create([
+            'client_id' => $client->id,
+            'name' => 'Installation terminée avec module',
+            'subdomain' => 'fk-term-module-'.uniqid(),
+            'status' => 'terminated',
+        ]);
+
+        $module = $this->makeModule();
+        $installationModule = InstallationModule::query()->create([
+            'installation_id' => $installation->id,
+            'module_id' => $module->id,
+            'status' => InstallationModule::STATUS_ACTIVE,
+        ]);
+
+        $this->assertInstallationDestroyIsBlockedByInstallationModulesForeignKey(
+            $user,
+            $installation,
+            $client,
+            $module,
+            $installationModule,
+        );
+    }
+
+    public function test_destroy_installation_with_subscription_and_installation_module_is_blocked_by_foreign_key(): void
+    {
+        $user = User::factory()->create();
+        $client = $this->makeClient();
+
+        $installation = Installation::query()->create([
+            'client_id' => $client->id,
+            'name' => 'Installation abonnement et module',
+            'subdomain' => 'fk-sub-module-'.uniqid(),
+            'status' => 'active',
+        ]);
+
+        Subscription::query()->create([
+            'installation_id' => $installation->id,
+            'amount' => 15000,
+            'currency' => 'XOF',
+            'status' => Subscription::STATUS_ACTIVE,
+        ]);
+
+        $module = $this->makeModule();
+        $installationModule = InstallationModule::query()->create([
+            'installation_id' => $installation->id,
+            'module_id' => $module->id,
+            'status' => InstallationModule::STATUS_ACTIVE,
+        ]);
+
+        $this->assertInstallationDestroyIsBlockedWithSubscriptionAndInstallationModule(
+            $user,
+            $installation,
+            $client,
+            $module,
+            $installationModule,
+        );
+    }
+
     public function test_installation_deletion_is_audited_without_polymorphic_reference(): void
     {
         $user = User::factory()->create();
@@ -331,6 +426,71 @@ class InstallationAuditTest extends TestCase
             $subscriptionCount,
             Subscription::query()->where('installation_id', $installationId)->count(),
         );
+        $this->assertSame(0, AuditLog::query()->where('action', 'installation.deleted')->count());
+    }
+
+    private function makeModule(): Module
+    {
+        return Module::query()->create([
+            'name' => 'Module Test',
+            'slug' => 'module-'.uniqid(),
+            'currency' => 'XOF',
+            'status' => Module::STATUS_ACTIVE,
+            'sort_order' => 0,
+        ]);
+    }
+
+    private function assertInstallationDestroyIsBlockedByInstallationModulesForeignKey(
+        User $user,
+        Installation $installation,
+        Client $client,
+        Module $module,
+        InstallationModule $installationModule,
+    ): void {
+        $installationId = $installation->id;
+        $clientId = $client->id;
+        $moduleId = $module->id;
+        $installationModuleId = $installationModule->id;
+
+        $this->withoutExceptionHandling();
+
+        try {
+            $this->actingAs($user)->delete(route('installations.destroy', $installation));
+            $this->fail('Expected installation deletion to be blocked by installation_modules foreign key (QueryException).');
+        } catch (QueryException $exception) {
+            $this->assertNotSame('', trim($exception->getMessage()));
+        }
+
+        $this->assertDatabaseHas('installations', ['id' => $installationId]);
+        $this->assertDatabaseHas('clients', ['id' => $clientId]);
+        $this->assertDatabaseHas('modules', ['id' => $moduleId]);
+        $this->assertDatabaseHas('installation_modules', ['id' => $installationModuleId]);
+        $this->assertSame(0, AuditLog::query()->where('action', 'installation.deleted')->count());
+    }
+
+    private function assertInstallationDestroyIsBlockedWithSubscriptionAndInstallationModule(
+        User $user,
+        Installation $installation,
+        Client $client,
+        Module $module,
+        InstallationModule $installationModule,
+    ): void {
+        $installationId = $installation->id;
+
+        $this->withoutExceptionHandling();
+
+        try {
+            $this->actingAs($user)->delete(route('installations.destroy', $installation));
+            $this->fail('Expected installation deletion to be blocked by child foreign keys (QueryException).');
+        } catch (QueryException $exception) {
+            $this->assertNotSame('', trim($exception->getMessage()));
+        }
+
+        $this->assertDatabaseHas('installations', ['id' => $installationId]);
+        $this->assertDatabaseHas('clients', ['id' => $client->id]);
+        $this->assertSame(1, Subscription::query()->where('installation_id', $installationId)->count());
+        $this->assertDatabaseHas('installation_modules', ['id' => $installationModule->id]);
+        $this->assertDatabaseHas('modules', ['id' => $module->id]);
         $this->assertSame(0, AuditLog::query()->where('action', 'installation.deleted')->count());
     }
 }
