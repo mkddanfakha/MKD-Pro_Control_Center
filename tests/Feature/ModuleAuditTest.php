@@ -3,8 +3,12 @@
 namespace Tests\Feature;
 
 use App\Models\AuditLog;
+use App\Models\Client;
+use App\Models\Installation;
+use App\Models\InstallationModule;
 use App\Models\Module;
 use App\Models\User;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -122,6 +126,112 @@ class ModuleAuditTest extends TestCase
         $this->assertSame($moduleId, $log->old_values['id']);
     }
 
+    public function test_destroy_module_with_installation_module_is_blocked_by_foreign_key(): void
+    {
+        $user = User::factory()->create();
+        $client = $this->makeClient();
+
+        $installation = Installation::query()->create([
+            'client_id' => $client->id,
+            'name' => 'Installation avec module catalogue',
+            'subdomain' => 'fk-mod-'.uniqid(),
+            'status' => 'active',
+        ]);
+
+        $module = $this->makeModule();
+
+        $installationModule = InstallationModule::query()->create([
+            'installation_id' => $installation->id,
+            'module_id' => $module->id,
+            'status' => InstallationModule::STATUS_ACTIVE,
+        ]);
+
+        $this->assertModuleDestroyIsBlockedByForeignKey($user, $module);
+
+        $this->assertDatabaseHas('modules', ['id' => $module->id]);
+        $this->assertDatabaseHas('installations', ['id' => $installation->id]);
+        $this->assertDatabaseHas('installation_modules', ['id' => $installationModule->id]);
+        $this->assertDatabaseHas('clients', ['id' => $client->id]);
+    }
+
+    public function test_destroy_module_with_multiple_installation_modules_is_blocked_by_foreign_key(): void
+    {
+        $user = User::factory()->create();
+        $client = $this->makeClient();
+
+        $installationA = Installation::query()->create([
+            'client_id' => $client->id,
+            'name' => 'Installation A',
+            'subdomain' => 'fk-mod-a-'.uniqid(),
+            'status' => 'active',
+        ]);
+
+        $installationB = Installation::query()->create([
+            'client_id' => $client->id,
+            'name' => 'Installation B',
+            'subdomain' => 'fk-mod-b-'.uniqid(),
+            'status' => 'active',
+        ]);
+
+        $module = $this->makeModule();
+
+        $installationModuleA = InstallationModule::query()->create([
+            'installation_id' => $installationA->id,
+            'module_id' => $module->id,
+            'status' => InstallationModule::STATUS_ACTIVE,
+        ]);
+
+        $installationModuleB = InstallationModule::query()->create([
+            'installation_id' => $installationB->id,
+            'module_id' => $module->id,
+            'status' => InstallationModule::STATUS_ACTIVE,
+        ]);
+
+        $this->assertModuleDestroyIsBlockedByForeignKey($user, $module);
+
+        $this->assertDatabaseHas('modules', ['id' => $module->id]);
+        $this->assertDatabaseHas('installations', ['id' => $installationA->id]);
+        $this->assertDatabaseHas('installations', ['id' => $installationB->id]);
+        $this->assertDatabaseHas('installation_modules', ['id' => $installationModuleA->id]);
+        $this->assertDatabaseHas('installation_modules', ['id' => $installationModuleB->id]);
+    }
+
+    public function test_destroy_inactive_module_with_installation_module_is_blocked_by_foreign_key(): void
+    {
+        $user = User::factory()->create();
+        $client = $this->makeClient();
+
+        $module = Module::query()->create([
+            'name' => 'Module inactif',
+            'slug' => 'inactive-'.uniqid(),
+            'currency' => 'XOF',
+            'status' => Module::STATUS_INACTIVE,
+            'sort_order' => 0,
+        ]);
+
+        $installation = Installation::query()->create([
+            'client_id' => $client->id,
+            'name' => 'Installation module inactif',
+            'subdomain' => 'fk-inact-mod-'.uniqid(),
+            'status' => 'active',
+        ]);
+
+        $installationModule = InstallationModule::query()->create([
+            'installation_id' => $installation->id,
+            'module_id' => $module->id,
+            'status' => InstallationModule::STATUS_ACTIVE,
+        ]);
+
+        $this->assertModuleDestroyIsBlockedByForeignKey($user, $module);
+
+        $this->assertDatabaseHas('modules', [
+            'id' => $module->id,
+            'status' => Module::STATUS_INACTIVE,
+        ]);
+        $this->assertDatabaseHas('installations', ['id' => $installation->id]);
+        $this->assertDatabaseHas('installation_modules', ['id' => $installationModule->id]);
+    }
+
     public function test_consultation_routes_do_not_create_audit_logs(): void
     {
         $user = User::factory()->create();
@@ -185,5 +295,39 @@ class ModuleAuditTest extends TestCase
 
         $this->assertSame(0, Module::query()->count());
         $this->assertSame(0, AuditLog::query()->count());
+    }
+
+    private function makeClient(): Client
+    {
+        return Client::query()->create([
+            'company_name' => 'Client Test',
+            'contact_name' => 'Contact Test',
+            'status' => 'active',
+        ]);
+    }
+
+    private function makeModule(): Module
+    {
+        return Module::query()->create([
+            'name' => 'Module Test',
+            'slug' => 'module-'.uniqid(),
+            'currency' => 'XOF',
+            'status' => Module::STATUS_ACTIVE,
+            'sort_order' => 0,
+        ]);
+    }
+
+    private function assertModuleDestroyIsBlockedByForeignKey(User $user, Module $module): void
+    {
+        $this->withoutExceptionHandling();
+
+        try {
+            $this->actingAs($user)->delete(route('modules.destroy', $module));
+            $this->fail('Expected module deletion to be blocked by installation_modules foreign key (QueryException).');
+        } catch (QueryException $exception) {
+            $this->assertNotSame('', trim($exception->getMessage()));
+        }
+
+        $this->assertSame(0, AuditLog::query()->where('action', 'module.deleted')->count());
     }
 }
