@@ -8,6 +8,7 @@ use App\Models\Installation;
 use App\Models\InstallationModule;
 use App\Models\Module;
 use App\Models\User;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -130,6 +131,210 @@ class InstallationModuleAuditTest extends TestCase
         $this->assertSame('À supprimer', $log->old_values['notes']);
     }
 
+    public function test_deleting_last_installation_module_allows_installation_deletion(): void
+    {
+        $user = User::factory()->create();
+        $client = $this->makeClient();
+
+        $installation = Installation::query()->create([
+            'client_id' => $client->id,
+            'name' => 'Installation sans abonnement',
+            'subdomain' => 'last-pivot-inst-'.uniqid(),
+            'status' => 'active',
+        ]);
+
+        $module = $this->makeModule();
+
+        $installationModule = InstallationModule::query()->create([
+            'installation_id' => $installation->id,
+            'module_id' => $module->id,
+            'status' => InstallationModule::STATUS_ACTIVE,
+        ]);
+
+        $installationId = $installation->id;
+        $assignmentId = $installationModule->id;
+
+        $this->actingAs($user)
+            ->delete(route('installation-modules.destroy', $installationModule))
+            ->assertRedirect(route('installation-modules.index'));
+
+        $this->assertDatabaseMissing('installation_modules', ['id' => $assignmentId]);
+        $this->assertDatabaseHas('installations', ['id' => $installationId]);
+        $this->assertDatabaseHas('modules', ['id' => $module->id]);
+        $this->assertDatabaseHas('clients', ['id' => $client->id]);
+
+        $this->assertSame(1, AuditLog::query()->where('action', 'installation_module.deleted')->count());
+        $this->assertSame(0, AuditLog::query()->where('action', 'installation.deleted')->count());
+
+        $this->actingAs($user)
+            ->delete(route('installations.destroy', $installation))
+            ->assertRedirect(route('installations.index'));
+
+        $this->assertDatabaseMissing('installations', ['id' => $installationId]);
+        $this->assertDatabaseHas('clients', ['id' => $client->id]);
+        $this->assertDatabaseHas('modules', ['id' => $module->id]);
+
+        $this->assertSame(1, AuditLog::query()->where('action', 'installation.deleted')->count());
+    }
+
+    public function test_deleting_last_installation_module_allows_module_deletion(): void
+    {
+        $user = User::factory()->create();
+        $installation = $this->makeInstallation();
+        $module = $this->makeModule();
+
+        $installationModule = InstallationModule::query()->create([
+            'installation_id' => $installation->id,
+            'module_id' => $module->id,
+            'status' => InstallationModule::STATUS_ACTIVE,
+        ]);
+
+        $moduleId = $module->id;
+        $installationId = $installation->id;
+        $assignmentId = $installationModule->id;
+
+        $this->actingAs($user)
+            ->delete(route('installation-modules.destroy', $installationModule))
+            ->assertRedirect(route('installation-modules.index'));
+
+        $this->assertDatabaseMissing('installation_modules', ['id' => $assignmentId]);
+        $this->assertDatabaseHas('modules', ['id' => $moduleId]);
+        $this->assertDatabaseHas('installations', ['id' => $installationId]);
+
+        $this->assertSame(1, AuditLog::query()->where('action', 'installation_module.deleted')->count());
+        $this->assertSame(0, AuditLog::query()->where('action', 'module.deleted')->count());
+
+        $this->actingAs($user)
+            ->delete(route('modules.destroy', $module))
+            ->assertRedirect(route('modules.index'));
+
+        $this->assertDatabaseMissing('modules', ['id' => $moduleId]);
+        $this->assertDatabaseHas('installations', ['id' => $installationId]);
+
+        $this->assertSame(1, AuditLog::query()->where('action', 'module.deleted')->count());
+    }
+
+    public function test_deleting_one_installation_module_keeps_other_module_assignments(): void
+    {
+        $user = User::factory()->create();
+        $installationA = $this->makeInstallation();
+        $installationB = $this->makeInstallation();
+        $module = $this->makeModule();
+
+        $installationModuleA = InstallationModule::query()->create([
+            'installation_id' => $installationA->id,
+            'module_id' => $module->id,
+            'status' => InstallationModule::STATUS_ACTIVE,
+        ]);
+
+        $installationModuleB = InstallationModule::query()->create([
+            'installation_id' => $installationB->id,
+            'module_id' => $module->id,
+            'status' => InstallationModule::STATUS_ACTIVE,
+        ]);
+
+        $this->actingAs($user)
+            ->delete(route('installation-modules.destroy', $installationModuleA))
+            ->assertRedirect(route('installation-modules.index'));
+
+        $this->assertDatabaseMissing('installation_modules', ['id' => $installationModuleA->id]);
+        $this->assertDatabaseHas('installation_modules', ['id' => $installationModuleB->id]);
+        $this->assertDatabaseHas('installations', ['id' => $installationA->id]);
+        $this->assertDatabaseHas('installations', ['id' => $installationB->id]);
+        $this->assertDatabaseHas('modules', ['id' => $module->id]);
+
+        $this->assertSame(1, AuditLog::query()->where('action', 'installation_module.deleted')->count());
+        $this->assertSame(0, AuditLog::query()->where('action', 'module.deleted')->count());
+
+        $this->assertModuleDestroyIsBlockedByForeignKey($user, $module);
+
+        $this->assertDatabaseHas('modules', ['id' => $module->id]);
+        $this->assertDatabaseHas('installation_modules', ['id' => $installationModuleB->id]);
+    }
+
+    public function test_deleting_one_installation_module_keeps_other_installation_assignments(): void
+    {
+        $user = User::factory()->create();
+        $installation = $this->makeInstallation();
+        $moduleM1 = $this->makeModule();
+        $moduleM2 = Module::query()->create([
+            'name' => 'Module M2',
+            'slug' => 'module-m2-'.uniqid(),
+            'currency' => 'XOF',
+            'status' => Module::STATUS_ACTIVE,
+            'sort_order' => 1,
+        ]);
+
+        $installationModuleM1 = InstallationModule::query()->create([
+            'installation_id' => $installation->id,
+            'module_id' => $moduleM1->id,
+            'status' => InstallationModule::STATUS_ACTIVE,
+        ]);
+
+        $installationModuleM2 = InstallationModule::query()->create([
+            'installation_id' => $installation->id,
+            'module_id' => $moduleM2->id,
+            'status' => InstallationModule::STATUS_ACTIVE,
+        ]);
+
+        $this->actingAs($user)
+            ->delete(route('installation-modules.destroy', $installationModuleM1))
+            ->assertRedirect(route('installation-modules.index'));
+
+        $this->assertDatabaseMissing('installation_modules', ['id' => $installationModuleM1->id]);
+        $this->assertDatabaseHas('installation_modules', ['id' => $installationModuleM2->id]);
+        $this->assertDatabaseHas('installations', ['id' => $installation->id]);
+        $this->assertDatabaseHas('modules', ['id' => $moduleM1->id]);
+        $this->assertDatabaseHas('modules', ['id' => $moduleM2->id]);
+
+        $this->assertSame(1, AuditLog::query()->where('action', 'installation_module.deleted')->count());
+        $this->assertSame(0, AuditLog::query()->where('action', 'installation.deleted')->count());
+
+        $this->assertInstallationDestroyIsBlockedByForeignKey($user, $installation);
+
+        $this->assertDatabaseHas('installations', ['id' => $installation->id]);
+        $this->assertDatabaseHas('installation_modules', ['id' => $installationModuleM2->id]);
+    }
+
+    public function test_deleting_inactive_installation_module_keeps_parents_unchanged(): void
+    {
+        $user = User::factory()->create();
+        $installation = $this->makeInstallation();
+        $module = $this->makeModule();
+
+        $installationStatusBefore = $installation->status;
+        $moduleStatusBefore = $module->status;
+
+        $installationModule = InstallationModule::query()->create([
+            'installation_id' => $installation->id,
+            'module_id' => $module->id,
+            'status' => InstallationModule::STATUS_INACTIVE,
+        ]);
+
+        $assignmentId = $installationModule->id;
+
+        $this->actingAs($user)
+            ->delete(route('installation-modules.destroy', $installationModule))
+            ->assertRedirect(route('installation-modules.index'));
+
+        $this->assertDatabaseMissing('installation_modules', ['id' => $assignmentId]);
+        $this->assertDatabaseHas('installations', [
+            'id' => $installation->id,
+            'status' => $installationStatusBefore,
+        ]);
+        $this->assertDatabaseHas('modules', [
+            'id' => $module->id,
+            'status' => $moduleStatusBefore,
+        ]);
+
+        $log = AuditLog::query()->where('action', 'installation_module.deleted')->sole();
+
+        $this->assertSame($assignmentId, $log->old_values['id']);
+        $this->assertSame(InstallationModule::STATUS_INACTIVE, $log->old_values['status']);
+        $this->assertSame(0, AuditLog::query()->where('action', 'installation.deleted')->count());
+        $this->assertSame(0, AuditLog::query()->where('action', 'module.deleted')->count());
+    }
+
     public function test_consultation_routes_do_not_create_audit_logs(): void
     {
         $user = User::factory()->create();
@@ -221,13 +426,18 @@ class InstallationModuleAuditTest extends TestCase
         $this->assertSame(0, AuditLog::query()->count());
     }
 
-    private function makeInstallation(): Installation
+    private function makeClient(): Client
     {
-        $client = Client::query()->create([
+        return Client::query()->create([
             'company_name' => 'Client Test',
             'contact_name' => 'Contact Test',
             'status' => 'active',
         ]);
+    }
+
+    private function makeInstallation(): Installation
+    {
+        $client = $this->makeClient();
 
         return Installation::query()->create([
             'client_id' => $client->id,
@@ -246,5 +456,43 @@ class InstallationModuleAuditTest extends TestCase
             'status' => Module::STATUS_ACTIVE,
             'sort_order' => 0,
         ]);
+    }
+
+    private function assertModuleDestroyIsBlockedByForeignKey(User $user, Module $module): void
+    {
+        $moduleDeletedAuditCount = AuditLog::query()->where('action', 'module.deleted')->count();
+
+        $this->withoutExceptionHandling();
+
+        try {
+            $this->actingAs($user)->delete(route('modules.destroy', $module));
+            $this->fail('Expected module deletion to be blocked by installation_modules foreign key (QueryException).');
+        } catch (QueryException $exception) {
+            $this->assertNotSame('', trim($exception->getMessage()));
+        }
+
+        $this->assertSame(
+            $moduleDeletedAuditCount,
+            AuditLog::query()->where('action', 'module.deleted')->count(),
+        );
+    }
+
+    private function assertInstallationDestroyIsBlockedByForeignKey(User $user, Installation $installation): void
+    {
+        $installationDeletedAuditCount = AuditLog::query()->where('action', 'installation.deleted')->count();
+
+        $this->withoutExceptionHandling();
+
+        try {
+            $this->actingAs($user)->delete(route('installations.destroy', $installation));
+            $this->fail('Expected installation deletion to be blocked by installation_modules foreign key (QueryException).');
+        } catch (QueryException $exception) {
+            $this->assertNotSame('', trim($exception->getMessage()));
+        }
+
+        $this->assertSame(
+            $installationDeletedAuditCount,
+            AuditLog::query()->where('action', 'installation.deleted')->count(),
+        );
     }
 }
