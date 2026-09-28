@@ -421,6 +421,306 @@ class SubscriptionCreditConsumptionTest extends TestCase
         $this->service->renew($subscription, $payment->fresh());
     }
 
+    public function test_http_refunded_payment_retains_arithmetic_remaining_but_excludes_consumable_credit(): void
+    {
+        $user = User::factory()->create();
+        $subscription = $this->makeSubscription();
+        $payment = $this->makePaidPayment($subscription, 90000, 6);
+
+        $this->actingAs($user)->put(route('payments.update', $payment), [
+            'subscription_id' => $subscription->id,
+            'amount' => 90000,
+            'currency' => 'XOF',
+            'status' => Payment::STATUS_REFUNDED,
+            'paid_at' => '2026-10-01 12:00:00',
+            'payment_method' => 'wave',
+            'reference' => 'REF-'.uniqid(),
+        ])->assertRedirect();
+
+        $payment->refresh();
+
+        $this->assertSame(Payment::STATUS_REFUNDED, $payment->status);
+        $this->assertSame(6, (int) $payment->credit_months_purchased);
+        $this->assertSame(6, $payment->remainingCreditMonths());
+        $this->assertSame(0, SubscriptionPaymentConsumption::query()->count());
+        $this->assertFalse($this->service->canConsumeCreditFromPayment($payment));
+
+        $credit = $this->service->summarizeSubscriptionCreditForDisplay($subscription->fresh());
+        $this->assertSame(0, $credit['available_months']);
+
+        try {
+            $this->service->consumeCreditFromPayment($payment->fresh());
+            $this->fail('Expected SubscriptionRenewalException was not thrown.');
+        } catch (SubscriptionRenewalException) {
+            // expected
+        }
+
+        try {
+            $this->service->consumeNextCreditForSubscription($subscription->fresh());
+            $this->fail('Expected SubscriptionRenewalException was not thrown.');
+        } catch (SubscriptionRenewalException $exception) {
+            $this->assertSame('Aucun crédit disponible pour cet abonnement.', $exception->getMessage());
+        }
+    }
+
+    public function test_pending_payment_may_have_arithmetic_remaining_but_is_not_consumable(): void
+    {
+        $subscription = $this->makeSubscription();
+        $payment = Payment::query()->create([
+            'subscription_id' => $subscription->id,
+            'amount' => 90000,
+            'currency' => 'XOF',
+            'status' => Payment::STATUS_PENDING,
+            'monthly_unit_amount' => 15000,
+            'credit_months_purchased' => 6,
+        ]);
+
+        $this->assertSame(6, $payment->remainingCreditMonths());
+        $this->assertFalse($this->service->canConsumeCreditFromPayment($payment));
+
+        try {
+            $this->service->consumeCreditFromPayment($payment);
+            $this->fail('Expected SubscriptionRenewalException was not thrown.');
+        } catch (SubscriptionRenewalException) {
+            // expected
+        }
+
+        try {
+            $this->service->consumeNextCreditForSubscription($subscription);
+            $this->fail('Expected SubscriptionRenewalException was not thrown.');
+        } catch (SubscriptionRenewalException $exception) {
+            $this->assertSame('Aucun crédit disponible pour cet abonnement.', $exception->getMessage());
+        }
+    }
+
+    public function test_failed_payment_may_have_arithmetic_remaining_but_is_not_consumable(): void
+    {
+        $subscription = $this->makeSubscription();
+        $payment = Payment::query()->create([
+            'subscription_id' => $subscription->id,
+            'amount' => 90000,
+            'currency' => 'XOF',
+            'status' => Payment::STATUS_FAILED,
+            'monthly_unit_amount' => 15000,
+            'credit_months_purchased' => 6,
+        ]);
+
+        $this->assertSame(6, $payment->remainingCreditMonths());
+        $this->assertFalse($this->service->canConsumeCreditFromPayment($payment));
+
+        try {
+            $this->service->consumeCreditFromPayment($payment);
+            $this->fail('Expected SubscriptionRenewalException was not thrown.');
+        } catch (SubscriptionRenewalException) {
+            // expected
+        }
+
+        try {
+            $this->service->consumeNextCreditForSubscription($subscription);
+            $this->fail('Expected SubscriptionRenewalException was not thrown.');
+        } catch (SubscriptionRenewalException $exception) {
+            $this->assertSame('Aucun crédit disponible pour cet abonnement.', $exception->getMessage());
+        }
+    }
+
+    public function test_paid_payment_six_months_is_consumable_and_decrements_arithmetic_remaining(): void
+    {
+        $subscription = $this->makeSubscription([
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        $payment = $this->makePaidPayment($subscription, 90000, 6);
+
+        $this->assertSame(6, $payment->remainingCreditMonths());
+        $this->assertTrue($this->service->canConsumeCreditFromPayment($payment));
+
+        $this->service->consumeCreditFromPayment($payment);
+
+        $payment->refresh();
+
+        $this->assertSame(5, $payment->remainingCreditMonths());
+        $this->assertSame(1, SubscriptionPaymentConsumption::query()->where('payment_id', $payment->id)->count());
+        $this->assertSame(15000, (int) $payment->monthly_unit_amount);
+        $this->assertSame(6, (int) $payment->credit_months_purchased);
+    }
+
+    public function test_refunded_after_two_consumptions_keeps_history_and_blocks_new_consumption(): void
+    {
+        $subscription = $this->makeSubscription([
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        $payment = $this->makePaidPayment($subscription, 90000, 6);
+
+        $first = $this->service->consumeCreditFromPayment($payment);
+        $second = $this->service->consumeCreditFromPayment($payment->fresh());
+
+        $payment->update(['status' => Payment::STATUS_REFUNDED]);
+
+        $payment->refresh();
+
+        $this->assertSame(2, SubscriptionPaymentConsumption::query()->where('payment_id', $payment->id)->count());
+        $this->assertSame(4, $payment->remainingCreditMonths());
+        $this->assertFalse($this->service->canConsumeCreditFromPayment($payment));
+
+        $periods = SubscriptionPaymentConsumption::query()
+            ->where('payment_id', $payment->id)
+            ->orderBy('id')
+            ->get()
+            ->map(fn ($row) => $row->period_start->format('Y-m-d H:i:s'))
+            ->all();
+
+        $this->assertSame(
+            [
+                $first->period_start->format('Y-m-d H:i:s'),
+                $second->period_start->format('Y-m-d H:i:s'),
+            ],
+            $periods,
+        );
+
+        $this->expectException(SubscriptionRenewalException::class);
+        $this->service->consumeCreditFromPayment($payment->fresh());
+    }
+
+    public function test_exhausted_paid_payment_is_not_fifo_eligible(): void
+    {
+        $subscription = $this->makeSubscription([
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        $payment = $this->makePaidPayment($subscription, 15000, 1);
+
+        $this->service->consumeCreditFromPayment($payment);
+
+        $payment->refresh();
+
+        $this->assertSame(0, $payment->remainingCreditMonths());
+        $this->assertNotNull($payment->credit_exhausted_at);
+        $this->assertFalse($this->service->canConsumeCreditFromPayment($payment->fresh()));
+
+        try {
+            $this->service->consumeNextCreditForSubscription($subscription->fresh());
+            $this->fail('Expected SubscriptionRenewalException was not thrown.');
+        } catch (SubscriptionRenewalException $exception) {
+            $this->assertSame('Aucun crédit disponible pour cet abonnement.', $exception->getMessage());
+        }
+    }
+
+    public function test_fifo_skips_pending_failed_and_refunded_and_uses_paid_payment(): void
+    {
+        $subscription = $this->makeSubscription([
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        Payment::query()->create([
+            'subscription_id' => $subscription->id,
+            'amount' => 90000,
+            'currency' => 'XOF',
+            'status' => Payment::STATUS_PENDING,
+            'monthly_unit_amount' => 15000,
+            'credit_months_purchased' => 6,
+        ]);
+
+        Payment::query()->create([
+            'subscription_id' => $subscription->id,
+            'amount' => 90000,
+            'currency' => 'XOF',
+            'status' => Payment::STATUS_FAILED,
+            'monthly_unit_amount' => 15000,
+            'credit_months_purchased' => 6,
+        ]);
+
+        $refunded = $this->makePaidPayment($subscription, 90000, 6, [
+            'paid_at' => '2026-09-01 10:00:00',
+        ]);
+        $refunded->update(['status' => Payment::STATUS_REFUNDED]);
+
+        $eligible = $this->makePaidPayment($subscription, 15000, 1, [
+            'paid_at' => '2026-09-05 10:00:00',
+        ]);
+
+        $consumption = $this->service->consumeNextCreditForSubscription($subscription->fresh());
+
+        $this->assertSame($eligible->id, $consumption->payment_id);
+        $this->assertSame(0, SubscriptionPaymentConsumption::query()->where('payment_id', $refunded->id)->count());
+    }
+
+    public function test_credit_exhausted_at_does_not_block_remaining_arithmetic_credit_or_consumption_when_credit_remains(): void
+    {
+        $subscription = $this->makeSubscription([
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        $payment = $this->makePaidPayment($subscription, 90000, 6, [
+            'paid_at' => '2026-10-15 12:00:00',
+        ]);
+
+        $this->assertSame(90000, (int) $payment->amount);
+        $this->assertSame(15000, (int) $payment->monthly_unit_amount);
+        $this->assertSame(6, (int) $payment->credit_months_purchased);
+
+        $payment->update(['credit_exhausted_at' => now()]);
+        $payment->refresh();
+
+        $this->assertNotNull($payment->credit_exhausted_at);
+        $this->assertSame(6, $payment->remainingCreditMonths());
+        $this->assertTrue($this->service->canConsumeCreditFromPayment($payment->fresh()));
+
+        $historicalAmount = (int) $payment->amount;
+        $historicalMonthlyUnit = (int) $payment->monthly_unit_amount;
+        $historicalPurchased = (int) $payment->credit_months_purchased;
+
+        $consumption = $this->service->consumeCreditFromPayment($payment->fresh());
+
+        $payment->refresh();
+
+        $this->assertSame($payment->id, $consumption->payment_id);
+        $this->assertSame(1, SubscriptionPaymentConsumption::query()->where('payment_id', $payment->id)->count());
+        $this->assertSame(5, $payment->remainingCreditMonths());
+        $this->assertSame(Payment::STATUS_PAID, $payment->status);
+        $this->assertSame($historicalAmount, (int) $payment->amount);
+        $this->assertSame($historicalMonthlyUnit, (int) $payment->monthly_unit_amount);
+        $this->assertSame($historicalPurchased, (int) $payment->credit_months_purchased);
+        $this->assertNull(
+            $payment->credit_exhausted_at,
+            'refreshPaymentCreditExhaustionState() efface credit_exhausted_at tant qu\'il reste du crédit arithmétique.',
+        );
+
+        $fifoSubscription = $this->makeSubscription([
+            'current_period_start' => '2026-11-01 00:00:00',
+            'current_period_end' => '2026-11-30 23:59:59',
+        ]);
+
+        $desyncEarlier = $this->makePaidPayment($fifoSubscription, 90000, 6, [
+            'paid_at' => '2026-09-01 10:00:00',
+        ]);
+        $desyncEarlier->update(['credit_exhausted_at' => now()]);
+        $desyncEarlier->refresh();
+
+        $this->assertNotNull($desyncEarlier->credit_exhausted_at);
+        $this->assertSame(6, $desyncEarlier->remainingCreditMonths());
+
+        $laterEligible = $this->makePaidPayment($fifoSubscription, 15000, 1, [
+            'paid_at' => '2026-09-05 10:00:00',
+        ]);
+
+        $fifoConsumption = $this->service->consumeNextCreditForSubscription($fifoSubscription->fresh());
+
+        $this->assertSame(
+            $desyncEarlier->id,
+            $fifoConsumption->payment_id,
+            'FIFO (paid_at ASC, id ASC) sélectionne le paiement désynchronisé lorsque son reste arithmétique est > 0.',
+        );
+        $this->assertSame(1, SubscriptionPaymentConsumption::query()->where('payment_id', $desyncEarlier->id)->count());
+        $this->assertSame(0, SubscriptionPaymentConsumption::query()->where('payment_id', $laterEligible->id)->count());
+        $this->assertSame(5, $desyncEarlier->fresh()->remainingCreditMonths());
+    }
+
     private function updateSubscriptionAmountViaHttp(Subscription $subscription, int $amount): void
     {
         $user = User::factory()->create();

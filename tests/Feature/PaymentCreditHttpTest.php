@@ -517,6 +517,135 @@ class PaymentCreditHttpTest extends TestCase
         $this->assertSame($auditCountBefore, AuditLog::query()->where('action', 'payment.updated')->count());
     }
 
+    public function test_update_rejects_refunded_status_when_renewal_applied_without_consumption(): void
+    {
+        $user = User::factory()->create();
+        [$subscription, $payment] = $this->makeLegacyRenewalPaymentWithoutConsumption();
+
+        $auditCountBefore = AuditLog::query()->where('action', 'payment.updated')->count();
+
+        $response = $this->actingAs($user)->put(route('payments.update', $payment), $this->baselinePayloadForLegacyRenewalPayment($subscription, $payment, [
+            'status' => Payment::STATUS_REFUNDED,
+            'paid_at' => '2026-10-01 12:00:00',
+        ]));
+
+        $response->assertSessionHasErrors('status');
+
+        $payment->refresh();
+
+        $this->assertSame(Payment::STATUS_PAID, $payment->status);
+        $this->assertNotNull($payment->renewal_applied_at);
+        $this->assertSame(6, (int) $payment->credit_months_purchased);
+        $this->assertSame(15000, (int) $payment->monthly_unit_amount);
+        $this->assertSame(0, SubscriptionPaymentConsumption::query()->count());
+        $this->assertSame($auditCountBefore, AuditLog::query()->where('action', 'payment.updated')->count());
+    }
+
+    public function test_update_rejects_pending_status_when_renewal_applied_without_consumption(): void
+    {
+        $user = User::factory()->create();
+        [$subscription, $payment] = $this->makeLegacyRenewalPaymentWithoutConsumption();
+        $paidAt = $payment->paid_at->format('Y-m-d H:i:s');
+
+        $auditCountBefore = AuditLog::query()->where('action', 'payment.updated')->count();
+
+        $response = $this->actingAs($user)->put(route('payments.update', $payment), $this->validPayload($subscription, [
+            'subscription_id' => $payment->subscription_id,
+            'amount' => 90000,
+            'currency' => 'XOF',
+            'status' => Payment::STATUS_PENDING,
+        ]));
+
+        $response->assertSessionHasErrors('status');
+
+        $payment->refresh();
+
+        $this->assertSame(Payment::STATUS_PAID, $payment->status);
+        $this->assertSame($paidAt, $payment->paid_at->format('Y-m-d H:i:s'));
+        $this->assertSame(0, SubscriptionPaymentConsumption::query()->count());
+        $this->assertSame($auditCountBefore, AuditLog::query()->where('action', 'payment.updated')->count());
+    }
+
+    public function test_update_rejects_failed_status_when_renewal_applied_without_consumption(): void
+    {
+        $user = User::factory()->create();
+        [$subscription, $payment] = $this->makeLegacyRenewalPaymentWithoutConsumption();
+        $paidAt = $payment->paid_at->format('Y-m-d H:i:s');
+        $renewalAt = $payment->renewal_applied_at->format('Y-m-d H:i:s');
+
+        $auditCountBefore = AuditLog::query()->where('action', 'payment.updated')->count();
+
+        $response = $this->actingAs($user)->put(route('payments.update', $payment), $this->validPayload($subscription, [
+            'subscription_id' => $payment->subscription_id,
+            'amount' => 90000,
+            'currency' => 'XOF',
+            'status' => Payment::STATUS_FAILED,
+        ]));
+
+        $response->assertSessionHasErrors('status');
+
+        $payment->refresh();
+
+        $this->assertSame(Payment::STATUS_PAID, $payment->status);
+        $this->assertSame($paidAt, $payment->paid_at->format('Y-m-d H:i:s'));
+        $this->assertSame($renewalAt, $payment->renewal_applied_at->format('Y-m-d H:i:s'));
+        $this->assertSame(0, SubscriptionPaymentConsumption::query()->count());
+        $this->assertSame($auditCountBefore, AuditLog::query()->where('action', 'payment.updated')->count());
+    }
+
+    public function test_update_rejects_amount_change_when_renewal_applied_without_consumption(): void
+    {
+        $user = User::factory()->create();
+        [$subscription, $payment] = $this->makeLegacyRenewalPaymentWithoutConsumption();
+
+        $auditCountBefore = AuditLog::query()->where('action', 'payment.updated')->count();
+
+        $response = $this->actingAs($user)->put(route('payments.update', $payment), $this->baselinePayloadForLegacyRenewalPayment($subscription, $payment, [
+            'amount' => 120000,
+            'status' => Payment::STATUS_PAID,
+            'paid_at' => '2026-10-01 12:00:00',
+        ]));
+
+        $response->assertSessionHasErrors('amount');
+
+        $payment->refresh();
+
+        $this->assertSame(90000, (int) $payment->amount);
+        $this->assertSame($subscription->id, $payment->subscription_id);
+        $this->assertSame('XOF', $payment->currency);
+        $this->assertSame(6, (int) $payment->credit_months_purchased);
+        $this->assertSame(0, SubscriptionPaymentConsumption::query()->count());
+        $this->assertSame($auditCountBefore, AuditLog::query()->where('action', 'payment.updated')->count());
+    }
+
+    public function test_update_allows_refunded_status_when_renewal_applied_at_is_null(): void
+    {
+        $user = User::factory()->create();
+        $subscription = $this->makeSubscription(['amount' => 15000]);
+
+        $payment = $this->storePaidPayment($user, $subscription, 90000);
+
+        $this->assertNull($payment->renewal_applied_at);
+
+        $response = $this->actingAs($user)->put(route('payments.update', $payment), $this->validPayload($subscription, [
+            'amount' => 90000,
+            'status' => Payment::STATUS_REFUNDED,
+            'paid_at' => '2026-10-01 12:00:00',
+        ]));
+
+        $response->assertRedirect(route('payments.show', $payment));
+
+        $payment->refresh();
+
+        $this->assertSame(Payment::STATUS_REFUNDED, $payment->status);
+
+        $log = AuditLog::query()->where('action', 'payment.updated')->latest('id')->first();
+
+        $this->assertNotNull($log);
+        $this->assertSame(Payment::STATUS_PAID, $log->old_values['status']);
+        $this->assertSame(Payment::STATUS_REFUNDED, $log->new_values['status']);
+    }
+
     public function test_update_allows_financial_change_when_paid_without_consumption(): void
     {
         $user = User::factory()->create();
@@ -544,6 +673,42 @@ class PaymentCreditHttpTest extends TestCase
 
         $this->assertSame(45000, (int) $payment->amount);
         $this->assertSame(3, (int) $payment->credit_months_purchased);
+    }
+
+    /**
+     * @return array{0: Subscription, 1: Payment}
+     */
+    private function makeLegacyRenewalPaymentWithoutConsumption(): array
+    {
+        $subscription = $this->makeSubscription(['amount' => 15000]);
+
+        $payment = Payment::query()->create([
+            'subscription_id' => $subscription->id,
+            'amount' => 90000,
+            'currency' => 'XOF',
+            'status' => Payment::STATUS_PAID,
+            'paid_at' => '2026-10-01 12:00:00',
+            'monthly_unit_amount' => 15000,
+            'credit_months_purchased' => 6,
+            'renewal_applied_at' => '2026-10-02 12:00:00',
+        ]);
+
+        return [$subscription, $payment];
+    }
+
+    /**
+     * @param  array<string, mixed>  $overrides
+     * @return array<string, mixed>
+     */
+    private function baselinePayloadForLegacyRenewalPayment(Subscription $subscription, Payment $payment, array $overrides = []): array
+    {
+        return $this->validPayload($subscription, array_merge([
+            'subscription_id' => $payment->subscription_id,
+            'amount' => (int) $payment->amount,
+            'currency' => (string) $payment->currency,
+            'status' => Payment::STATUS_PAID,
+            'paid_at' => $payment->paid_at?->format('Y-m-d H:i:s'),
+        ], $overrides));
     }
 
     private function storePaidPayment(User $user, Subscription $subscription, int $amount): Payment
