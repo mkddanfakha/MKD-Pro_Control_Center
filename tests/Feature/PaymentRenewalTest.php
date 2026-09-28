@@ -10,6 +10,7 @@ use App\Models\Subscription;
 use App\Models\SubscriptionPaymentConsumption;
 use App\Models\AuditLog;
 use App\Models\User;
+use App\Services\InstallationAccessService;
 use App\Services\SubscriptionService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -229,6 +230,51 @@ class PaymentRenewalTest extends TestCase
         $response->assertSessionHas('success');
 
         $this->assertSame('2026-11-01 00:00:00', $subscription->fresh()->current_period_start->format('Y-m-d H:i:s'));
+    }
+
+    public function test_terminated_installation_renew_subscription_route_consumes_credit_and_remains_accessible(): void
+    {
+        $this->travelTo('2026-10-20 12:00:00');
+
+        $user = User::factory()->create();
+
+        $subscription = $this->makeSubscription([
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        $installation = Installation::query()->findOrFail($subscription->installation_id);
+        $installation->update(['status' => 'terminated']);
+
+        $payment = $this->makePayment($subscription, [
+            'status' => Payment::STATUS_PAID,
+        ]);
+
+        $this->assertSame('terminated', $installation->fresh()->status);
+        $this->assertSame(0, SubscriptionPaymentConsumption::query()->count());
+        $this->assertSame(1, $payment->remainingCreditMonths());
+
+        $response = $this->actingAs($user)->post(route('payments.renew-subscription', $payment));
+
+        $response->assertRedirect(route('payments.show', $payment));
+        $response->assertSessionHas('success');
+
+        $subscription->refresh();
+        $payment->refresh();
+
+        $this->assertSame(1, SubscriptionPaymentConsumption::query()->count());
+        $this->assertSame(0, $payment->remainingCreditMonths());
+        $this->assertSame(Subscription::STATUS_ACTIVE, $subscription->status);
+        $this->assertSame('2026-11-01 00:00:00', $subscription->current_period_start->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-11-30 23:59:59', $subscription->current_period_end->format('Y-m-d H:i:s'));
+
+        $access = app(InstallationAccessService::class)->accessSummary(
+            $installation->fresh(['subscriptions']),
+        );
+
+        $this->assertTrue($access['accessible']);
+        $this->assertSame('accessible', $access['status']);
+        $this->assertSame(Subscription::STATUS_ACTIVE, $access['subscription_status']);
     }
 
     public function test_renewal_is_allowed_when_amount_and_currency_match_subscription(): void

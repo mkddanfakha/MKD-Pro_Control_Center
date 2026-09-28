@@ -9,6 +9,7 @@ use App\Models\Payment;
 use App\Models\Subscription;
 use App\Models\SubscriptionPaymentConsumption;
 use App\Models\User;
+use App\Services\InstallationAccessService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -155,6 +156,53 @@ class SubscriptionCreditConsumptionHttpTest extends TestCase
         $this->assertSame(0, $payment->remainingCreditMonths());
         $this->assertSame('2026-11-01 00:00:00', $subscription->current_period_start->format('Y-m-d H:i:s'));
         $this->assertSame(1, AuditLog::query()->where('action', 'subscription.credit_consumed')->count());
+    }
+
+    public function test_terminated_installation_with_active_subscription_can_consume_credit_and_remain_accessible(): void
+    {
+        $this->travelTo('2026-10-15 12:00:00');
+
+        $user = User::factory()->create();
+        $subscription = $this->makeSubscription();
+        $installation = Installation::query()->findOrFail($subscription->installation_id);
+        $installation->update(['status' => 'terminated']);
+
+        $payment = $this->makePaidPayment($subscription, 15000, 1);
+
+        $this->assertSame('terminated', $installation->fresh()->status);
+        $this->assertSame(Subscription::STATUS_ACTIVE, $subscription->status);
+        $this->assertSame(0, SubscriptionPaymentConsumption::query()->count());
+        $this->assertSame(1, $payment->remainingCreditMonths());
+
+        $periodEndBefore = $subscription->current_period_end->format('Y-m-d H:i:s');
+
+        $response = $this->actingAs($user)->post(route('subscriptions.consume-credit', $subscription));
+
+        $response->assertRedirect(route('subscriptions.show', $subscription));
+        $response->assertSessionHas('success');
+        $response->assertSessionDoesntHaveErrors();
+
+        $subscription->refresh();
+        $payment->refresh();
+
+        $this->assertSame(1, SubscriptionPaymentConsumption::query()->count());
+        $this->assertSame(0, $payment->remainingCreditMonths());
+        $this->assertSame(Subscription::STATUS_ACTIVE, $subscription->status);
+        $this->assertSame('2026-11-01 00:00:00', $subscription->current_period_start->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-11-30 23:59:59', $subscription->current_period_end->format('Y-m-d H:i:s'));
+        $this->assertNotSame($periodEndBefore, $subscription->current_period_end->format('Y-m-d H:i:s'));
+
+        $consumption = SubscriptionPaymentConsumption::query()->sole();
+        $this->assertSame($payment->id, $consumption->payment_id);
+        $this->assertSame($subscription->id, $consumption->subscription_id);
+
+        $access = app(InstallationAccessService::class)->accessSummary(
+            $installation->fresh(['subscriptions']),
+        );
+
+        $this->assertTrue($access['accessible']);
+        $this->assertSame('accessible', $access['status']);
+        $this->assertSame(Subscription::STATUS_ACTIVE, $access['subscription_status']);
     }
 
     public function test_consume_credit_rejects_terminated_subscription(): void
