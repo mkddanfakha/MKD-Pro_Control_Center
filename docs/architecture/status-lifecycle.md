@@ -185,6 +185,12 @@ La commande planifiée `subscriptions:sync-lifecycle` ne traite que les abonneme
 
 Service **sans effet de bord** : lecture seule, **ne modifie** ni installation, ni abonnement, ni base.
 
+Le **scheduler** (`subscriptions:sync-lifecycle` → `SubscriptionService::syncLifecycle()`) reste la source de **synchronisation des statuts en base** (`active` → `grace_period` → `suspended`, timestamps associés).
+
+`InstallationAccessService` calcule l’**accès effectif** à partir du **statut en base** et des **dates** (`current_period_end`, `grace_period_ends_at`), sans appeler `syncLifecycle()` ni persister de correction de statut. Un retard du cron **ne prolonge plus** l’accès au-delà de ces échéances.
+
+La **consommation de crédit** (réactivation possible depuis `grace_period` ou `suspended`) reste une logique **distincte** : elle n’est pas bloquée par `access.accessible`.
+
 ### Subscription courante
 
 `latestSubscription()` retourne **au plus une** ligne parmi les statuts **non terminés** :
@@ -199,15 +205,19 @@ Plusieurs subscriptions `terminated` sur la même installation sont **autorisée
 
 - **`Installation.status` n’est jamais lu** dans le calcul d’accès.
 
-### Matrice d’accès (comportement API `accessSummary()` / `accessStatus()`)
+### Matrice d’accès effectif (API `accessSummary()` / `accessStatus()`)
 
-| Situation (subscription courante) | `access.status` | Accessible (`isAccessible()`) |
-| --------------------------------- | ----------------- | ----------------------------- |
-| `active`                          | `accessible`      | oui                           |
-| `grace_period`                    | `accessible`      | oui                           |
-| `suspended`                       | `suspended`       | non                           |
-| Aucune non terminée (y compris **uniquement** des `terminated`) | `no_subscription` | non                           |
-| Statut inconnu (hors liste métier en base) | `no_subscription` (non sélectionné par `latestSubscription()`) | non |
+Comparaisons calendaires : **`now <= current_period_end`** (fin inclusive) pour `active` ; **`now <= grace_period_ends_at`** (fin inclusive) pour `grace_period`. Si `current_period_end` ou `grace_period_ends_at` est **null**, le comportement historique est conservé (pas de calcul de grâce côté accès).
+
+| Situation (subscription courante) | `subscription_status` (DB) | `access.status` | Accessible |
+| --------------------------------- | -------------------------- | ----------------- | ---------- |
+| `active`, période non expirée | `active` | `accessible` | oui |
+| `active`, `current_period_end` dépassé (sync lifecycle pas encore passée) | `active` | `suspended` | non |
+| `grace_period`, grâce non expirée | `grace_period` | `accessible` | oui |
+| `grace_period`, `grace_period_ends_at` dépassé | `grace_period` | `suspended` | non |
+| `suspended` | `suspended` | `suspended` | non |
+| Aucune non terminée (y compris **uniquement** des `terminated`) | — | `no_subscription` | non |
+| Statut inconnu (hors liste métier en base) | — | `no_subscription` (non sélectionné par `latestSubscription()`) | non |
 
 ### Nuance `terminated` / `no_subscription`
 

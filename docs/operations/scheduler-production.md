@@ -26,6 +26,8 @@ php artisan subscriptions:sync-lifecycle
 
 orchestre l’appel à `SubscriptionService::syncLifecycle()` pour les abonnements en statut `active` ou `grace_period` (voir section 7).
 
+`InstallationAccessService` (back-office) calcule l’**accès effectif** à partir des statuts et dates en base **sans** modifier le lifecycle ; un retard du cron ne doit plus maintenir l’accès au-delà de `current_period_end` ou `grace_period_ends_at` (voir `docs/architecture/status-lifecycle.md`). La consommation de crédit reste indépendante de cet accès calculé.
+
 **Important :** définir `->daily()` dans le code **ne lance pas** la commande automatiquement. Laravel attend qu’un processus externe invoque le scheduler (section B).
 
 ---

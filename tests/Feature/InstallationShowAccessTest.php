@@ -19,9 +19,12 @@ class InstallationShowAccessTest extends TestCase
 
     public function test_show_includes_accessible_state_for_active_subscription(): void
     {
+        $this->travelTo('2026-10-15 12:00:00');
+
         $user = User::factory()->create();
         $installation = $this->makeInstallationWithSubscription([
             'status' => Subscription::STATUS_ACTIVE,
+            'current_period_end' => '2026-10-31 23:59:59',
         ]);
 
         $this->actingAs($user)
@@ -38,9 +41,12 @@ class InstallationShowAccessTest extends TestCase
 
     public function test_show_includes_accessible_state_for_grace_period_subscription(): void
     {
+        $this->travelTo('2026-11-05 12:00:00');
+
         $user = User::factory()->create();
         $installation = $this->makeInstallationWithSubscription([
             'status' => Subscription::STATUS_GRACE_PERIOD,
+            'grace_period_ends_at' => '2026-11-07 23:59:59',
         ]);
 
         $this->actingAs($user)
@@ -70,6 +76,8 @@ class InstallationShowAccessTest extends TestCase
 
     public function test_installation_access_becomes_accessible_after_credit_consumption_reactivates_suspended_subscription(): void
     {
+        $this->travelTo('2026-11-10 12:00:00');
+
         $installation = $this->makeInstallationWithSubscription([
             'status' => Subscription::STATUS_SUSPENDED,
             'current_period_start' => '2026-10-01 00:00:00',

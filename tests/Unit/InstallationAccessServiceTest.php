@@ -24,21 +24,32 @@ class InstallationAccessServiceTest extends TestCase
 
     public function test_active_subscription_makes_installation_accessible(): void
     {
+        $this->travelTo('2026-10-15 12:00:00');
+
         $installation = $this->makeInstallationWithSubscription([
             'status' => Subscription::STATUS_ACTIVE,
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
         ]);
 
         $this->assertTrue($this->service->isAccessible($installation));
+        $this->assertSubscriptionUnchangedAfterAccessCheck($installation);
         $this->assertInstallationUnchangedAfterAccessCheck($installation);
     }
 
     public function test_grace_period_subscription_makes_installation_accessible(): void
     {
+        $this->travelTo('2026-11-05 12:00:00');
+
         $installation = $this->makeInstallationWithSubscription([
             'status' => Subscription::STATUS_GRACE_PERIOD,
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+            'grace_period_ends_at' => '2026-11-07 23:59:59',
         ]);
 
         $this->assertTrue($this->service->isAccessible($installation));
+        $this->assertSubscriptionUnchangedAfterAccessCheck($installation);
         $this->assertInstallationUnchangedAfterAccessCheck($installation);
     }
 
@@ -92,11 +103,15 @@ class InstallationAccessServiceTest extends TestCase
 
     public function test_access_status_returns_expected_values(): void
     {
+        $this->travelTo('2026-10-15 12:00:00');
+
         $active = $this->makeInstallationWithSubscription([
             'status' => Subscription::STATUS_ACTIVE,
+            'current_period_end' => '2026-10-31 23:59:59',
         ]);
         $grace = $this->makeInstallationWithSubscription([
             'status' => Subscription::STATUS_GRACE_PERIOD,
+            'grace_period_ends_at' => '2026-11-07 23:59:59',
         ]);
         $suspended = $this->makeInstallationWithSubscription([
             'status' => Subscription::STATUS_SUSPENDED,
@@ -115,6 +130,8 @@ class InstallationAccessServiceTest extends TestCase
 
     public function test_non_terminated_subscription_is_selected_when_terminated_also_exists(): void
     {
+        $this->travelTo('2026-10-15 12:00:00');
+
         $installation = $this->makeInstallation();
 
         Subscription::query()->create([
@@ -129,6 +146,7 @@ class InstallationAccessServiceTest extends TestCase
             'amount' => 15000,
             'currency' => 'XOF',
             'status' => Subscription::STATUS_ACTIVE,
+            'current_period_end' => '2026-10-31 23:59:59',
         ]);
 
         $installation = $installation->fresh();
@@ -175,9 +193,14 @@ class InstallationAccessServiceTest extends TestCase
 
     public function test_terminated_plus_grace_period_selects_grace_period(): void
     {
+        $this->travelTo('2026-11-05 12:00:00');
+
         $installation = $this->makeInstallationWithSubscriptions([
             ['status' => Subscription::STATUS_TERMINATED],
-            ['status' => Subscription::STATUS_GRACE_PERIOD],
+            [
+                'status' => Subscription::STATUS_GRACE_PERIOD,
+                'grace_period_ends_at' => '2026-11-07 23:59:59',
+            ],
         ]);
 
         $this->assertSame(Subscription::STATUS_GRACE_PERIOD, $this->service->latestSubscription($installation)?->status);
@@ -198,6 +221,8 @@ class InstallationAccessServiceTest extends TestCase
 
     public function test_newer_terminated_subscription_does_not_mask_active_subscription(): void
     {
+        $this->travelTo('2026-10-15 12:00:00');
+
         $installation = $this->makeInstallation();
 
         $active = Subscription::query()->create([
@@ -205,6 +230,7 @@ class InstallationAccessServiceTest extends TestCase
             'amount' => 15000,
             'currency' => 'XOF',
             'status' => Subscription::STATUS_ACTIVE,
+            'current_period_end' => '2026-10-31 23:59:59',
         ]);
 
         $terminated = Subscription::query()->create([
@@ -295,5 +321,145 @@ class InstallationAccessServiceTest extends TestCase
             $before,
             $installation->fresh()->only(['status', 'suspended_at', 'terminated_at', 'name', 'subdomain']),
         );
+    }
+
+    private function assertSubscriptionUnchangedAfterAccessCheck(Installation $installation): void
+    {
+        $subscription = Subscription::query()
+            ->where('installation_id', $installation->id)
+            ->orderByDesc('id')
+            ->firstOrFail();
+
+        $before = $this->subscriptionLifecycleSnapshot($subscription->fresh());
+
+        $this->service->accessSummary($installation->fresh());
+
+        $this->assertSame($before, $this->subscriptionLifecycleSnapshot($subscription->fresh()));
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function subscriptionLifecycleSnapshot(Subscription $subscription): array
+    {
+        return [
+            'status' => $subscription->status,
+            'current_period_start' => $subscription->current_period_start?->format('Y-m-d H:i:s'),
+            'current_period_end' => $subscription->current_period_end?->format('Y-m-d H:i:s'),
+            'grace_period_ends_at' => $subscription->grace_period_ends_at?->format('Y-m-d H:i:s'),
+            'suspended_at' => $subscription->suspended_at?->format('Y-m-d H:i:s'),
+            'terminated_at' => $subscription->terminated_at?->format('Y-m-d H:i:s'),
+        ];
+    }
+
+    public function test_active_subscription_with_future_period_end_is_accessible(): void
+    {
+        $this->travelTo('2026-10-15 12:00:00');
+
+        $installation = $this->makeInstallationWithSubscription([
+            'status' => Subscription::STATUS_ACTIVE,
+            'current_period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        $this->assertTrue($this->service->isAccessible($installation));
+    }
+
+    public function test_active_subscription_at_exact_period_end_is_accessible(): void
+    {
+        $this->travelTo('2026-10-31 23:59:59');
+
+        $installation = $this->makeInstallationWithSubscription([
+            'status' => Subscription::STATUS_ACTIVE,
+            'current_period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        $this->assertTrue($this->service->isAccessible($installation));
+    }
+
+    public function test_active_subscription_with_expired_period_is_not_accessible_but_status_stays_active(): void
+    {
+        $this->travelTo('2026-11-01 00:00:00');
+
+        $installation = $this->makeInstallationWithSubscription([
+            'status' => Subscription::STATUS_ACTIVE,
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        $subscription = Subscription::query()->where('installation_id', $installation->id)->firstOrFail();
+
+        $summary = $this->service->accessSummary($installation);
+
+        $this->assertFalse($summary['accessible']);
+        $this->assertSame('suspended', $summary['status']);
+        $this->assertSame(Subscription::STATUS_ACTIVE, $summary['subscription_status']);
+        $this->assertSame(Subscription::STATUS_ACTIVE, $subscription->fresh()->status);
+    }
+
+    public function test_grace_period_subscription_with_future_grace_end_is_accessible(): void
+    {
+        $this->travelTo('2026-11-05 12:00:00');
+
+        $installation = $this->makeInstallationWithSubscription([
+            'status' => Subscription::STATUS_GRACE_PERIOD,
+            'grace_period_ends_at' => '2026-11-07 23:59:59',
+        ]);
+
+        $this->assertTrue($this->service->isAccessible($installation));
+    }
+
+    public function test_grace_period_subscription_at_exact_grace_end_is_accessible(): void
+    {
+        $this->travelTo('2026-11-07 23:59:59');
+
+        $installation = $this->makeInstallationWithSubscription([
+            'status' => Subscription::STATUS_GRACE_PERIOD,
+            'grace_period_ends_at' => '2026-11-07 23:59:59',
+        ]);
+
+        $this->assertTrue($this->service->isAccessible($installation));
+    }
+
+    public function test_grace_period_subscription_with_expired_grace_is_not_accessible_but_status_stays_grace_period(): void
+    {
+        $this->travelTo('2026-11-08 00:00:00');
+
+        $installation = $this->makeInstallationWithSubscription([
+            'status' => Subscription::STATUS_GRACE_PERIOD,
+            'current_period_end' => '2026-10-31 23:59:59',
+            'grace_period_ends_at' => '2026-11-07 23:59:59',
+        ]);
+
+        $subscription = Subscription::query()->where('installation_id', $installation->id)->firstOrFail();
+
+        $summary = $this->service->accessSummary($installation);
+
+        $this->assertFalse($summary['accessible']);
+        $this->assertSame('suspended', $summary['status']);
+        $this->assertSame(Subscription::STATUS_GRACE_PERIOD, $summary['subscription_status']);
+        $this->assertSame(Subscription::STATUS_GRACE_PERIOD, $subscription->fresh()->status);
+    }
+
+    public function test_suspended_subscription_with_available_credit_is_not_accessible(): void
+    {
+        $installation = $this->makeInstallationWithSubscription([
+            'status' => Subscription::STATUS_SUSPENDED,
+            'suspended_at' => '2026-11-08 00:00:00',
+        ]);
+
+        $this->assertFalse($this->service->isAccessible($installation));
+        $this->assertSame('suspended', $this->service->accessStatus($installation));
+    }
+
+    public function test_access_check_does_not_persist_subscription_changes(): void
+    {
+        $this->travelTo('2026-11-01 00:00:00');
+
+        $installation = $this->makeInstallationWithSubscription([
+            'status' => Subscription::STATUS_ACTIVE,
+            'current_period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        $this->assertSubscriptionUnchangedAfterAccessCheck($installation);
     }
 }

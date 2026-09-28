@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Installation;
 use App\Models\Subscription;
+use Carbon\Carbon;
 
 class InstallationAccessService
 {
@@ -47,13 +48,44 @@ class InstallationAccessService
             return 'no_subscription';
         }
 
+        if ($this->isSubscriptionEffectivelyAccessible($subscription)) {
+            return 'accessible';
+        }
+
+        if ($subscription->status === Subscription::STATUS_SUSPENDED) {
+            return 'suspended';
+        }
+
+        return 'suspended';
+    }
+
+    private function isSubscriptionEffectivelyAccessible(Subscription $subscription): bool
+    {
         return match ($subscription->status) {
-            Subscription::STATUS_ACTIVE,
-            Subscription::STATUS_GRACE_PERIOD => 'accessible',
-            Subscription::STATUS_SUSPENDED => 'suspended',
-            Subscription::STATUS_TERMINATED => 'terminated',
-            default => 'suspended',
+            Subscription::STATUS_ACTIVE => $this->isActivePeriodStillValid($subscription),
+            Subscription::STATUS_GRACE_PERIOD => $this->isGracePeriodStillValid($subscription),
+            Subscription::STATUS_SUSPENDED => false,
+            Subscription::STATUS_TERMINATED => false,
+            default => false,
         };
+    }
+
+    private function isActivePeriodStillValid(Subscription $subscription): bool
+    {
+        if ($subscription->current_period_end === null) {
+            return true;
+        }
+
+        return Carbon::now()->lessThanOrEqualTo(Carbon::parse($subscription->current_period_end));
+    }
+
+    private function isGracePeriodStillValid(Subscription $subscription): bool
+    {
+        if ($subscription->grace_period_ends_at === null) {
+            return true;
+        }
+
+        return Carbon::now()->lessThanOrEqualTo(Carbon::parse($subscription->grace_period_ends_at));
     }
 
     public function latestSubscription(Installation $installation): ?Subscription

@@ -51,6 +51,7 @@ class InstallationIndexTest extends TestCase
             'amount' => 15000,
             'currency' => 'XOF',
             'status' => Subscription::STATUS_GRACE_PERIOD,
+            'grace_period_ends_at' => '2026-12-31 23:59:59',
         ]);
 
         $this->actingAs($user)
