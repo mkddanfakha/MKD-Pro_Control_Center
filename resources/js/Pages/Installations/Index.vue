@@ -109,14 +109,6 @@ function accessDetailLabel(access) {
         return 'Aucun abonnement courant';
     }
 
-    if (access.status === 'suspended') {
-        return 'Abonnement suspendu';
-    }
-
-    if (access.status === 'no_subscription' || access.status === 'terminated') {
-        return 'Aucun abonnement courant';
-    }
-
     if (access.accessible) {
         if (access.subscription_status === 'grace_period') {
             return 'Période de grâce';
@@ -125,6 +117,28 @@ function accessDetailLabel(access) {
         if (access.subscription_status === 'active') {
             return 'Abonnement actif';
         }
+
+        return null;
+    }
+
+    if (
+        access.subscription_status == null
+        || access.status === 'no_subscription'
+        || access.status === 'terminated'
+    ) {
+        return 'Aucun abonnement courant';
+    }
+
+    if (access.subscription_status === 'active') {
+        return 'Période échue';
+    }
+
+    if (access.subscription_status === 'grace_period') {
+        return 'Période de grâce échue';
+    }
+
+    if (access.subscription_status === 'suspended') {
+        return 'Abonnement suspendu';
     }
 
     return null;

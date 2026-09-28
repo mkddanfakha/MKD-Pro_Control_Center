@@ -12,14 +12,16 @@ class ClientAccessLabelsTest extends TestCase
 
         $this->assertStringContainsString('Accès autorisé', $contents);
         $this->assertStringContainsString('Accès non autorisé', $contents);
-        $this->assertStringContainsString('Abonnement suspendu', $this->accessDetailHelperSource($contents));
-        $this->assertStringContainsString('Période de grâce', $this->accessDetailHelperSource($contents));
-        $this->assertStringContainsString('Abonnement actif', $this->accessDetailHelperSource($contents));
+        $helper = $this->accessDetailHelperSource($contents);
+
+        $this->assertStringContainsString('Abonnement suspendu', $helper);
+        $this->assertStringContainsString('Période échue', $helper);
+        $this->assertStringContainsString('Période de grâce échue', $helper);
+        $this->assertStringContainsString('Période de grâce', $helper);
+        $this->assertStringContainsString('Abonnement actif', $helper);
         $this->assertStringContainsString('Aucun abonnement courant', $this->accessDetailHelperSource($contents));
-        $this->assertStringContainsString(
-            "access.status === 'no_subscription' || access.status === 'terminated'",
-            $this->accessDetailHelperSource($contents),
-        );
+        $this->assertStringContainsString("access.status === 'no_subscription'", $helper);
+        $this->assertStringContainsString("access.status === 'terminated'", $helper);
         $this->assertStringNotContainsString('Abonnement terminé', $this->accessDetailHelperSource($contents));
         $this->assertStringContainsString('terminated: \'Terminé\'', $contents);
     }
