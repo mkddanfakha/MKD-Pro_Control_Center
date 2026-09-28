@@ -157,6 +157,115 @@ class PaymentShowCreditPropsTest extends TestCase
                 ->has('paymentCredit.consumptions', 2));
     }
 
+    public function test_show_terminated_subscription_exposes_arithmetic_credit_but_not_renewable(): void
+    {
+        $user = User::factory()->create();
+        $subscription = $this->makeSubscription([
+            'status' => Subscription::STATUS_TERMINATED,
+            'terminated_at' => '2026-10-01 00:00:00',
+        ]);
+        $payment = $this->makePaidPayment($subscription, 45000, 3);
+
+        $this->actingAs($user)
+            ->get(route('payments.show', $payment))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Subscriptions/Payments/Show')
+                ->where('payment.subscription.status', Subscription::STATUS_TERMINATED)
+                ->where('paymentCredit.credit_months_purchased', 3)
+                ->where('paymentCredit.credit_months_remaining', 3)
+                ->where('paymentCredit.presents_consumable_credit', true)
+                ->where('canRenewSubscription', false));
+    }
+
+    public function test_show_terminated_subscription_with_partially_consumed_payment_exposes_remaining_arithmetic_credit(): void
+    {
+        $user = User::factory()->create();
+        $subscription = $this->makeSubscription([
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+        ]);
+        $payment = $this->makePaidPayment($subscription, 90000, 6);
+
+        SubscriptionPaymentConsumption::query()->create([
+            'payment_id' => $payment->id,
+            'subscription_id' => $subscription->id,
+            'period_start' => '2026-10-01 00:00:00',
+            'period_end' => '2026-10-31 23:59:59',
+            'consumed_at' => '2026-10-05 10:00:00',
+        ]);
+
+        $subscription->update([
+            'status' => Subscription::STATUS_TERMINATED,
+            'terminated_at' => '2026-11-01 00:00:00',
+        ]);
+
+        $this->actingAs($user)
+            ->get(route('payments.show', $payment))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('payment.subscription.status', Subscription::STATUS_TERMINATED)
+                ->where('paymentCredit.consumptions_count', 1)
+                ->where('paymentCredit.credit_months_remaining', 5)
+                ->where('paymentCredit.presents_consumable_credit', true)
+                ->where('canRenewSubscription', false));
+    }
+
+    public function test_show_terminated_refunded_payment_does_not_present_consumable_credit(): void
+    {
+        $user = User::factory()->create();
+        $subscription = $this->makeSubscription([
+            'status' => Subscription::STATUS_TERMINATED,
+            'terminated_at' => '2026-10-01 00:00:00',
+        ]);
+        $payment = $this->makePaidPayment($subscription, 90000, 6, [
+            'status' => Payment::STATUS_REFUNDED,
+        ]);
+
+        SubscriptionPaymentConsumption::query()->create([
+            'payment_id' => $payment->id,
+            'subscription_id' => $subscription->id,
+            'period_start' => '2026-10-01 00:00:00',
+            'period_end' => '2026-10-31 23:59:59',
+            'consumed_at' => '2026-10-05 10:00:00',
+        ]);
+
+        $this->actingAs($user)
+            ->get(route('payments.show', $payment))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('paymentCredit.is_refunded', true)
+                ->where('paymentCredit.credit_months_remaining', 5)
+                ->where('paymentCredit.presents_consumable_credit', false)
+                ->where('canRenewSubscription', false));
+    }
+
+    public function test_show_terminated_pending_payment_does_not_present_consumable_credit(): void
+    {
+        $user = User::factory()->create();
+        $subscription = $this->makeSubscription([
+            'status' => Subscription::STATUS_TERMINATED,
+            'terminated_at' => '2026-10-01 00:00:00',
+        ]);
+        $payment = Payment::query()->create([
+            'subscription_id' => $subscription->id,
+            'amount' => 45000,
+            'currency' => 'XOF',
+            'status' => Payment::STATUS_PENDING,
+            'monthly_unit_amount' => 15000,
+            'credit_months_purchased' => 3,
+        ]);
+
+        $this->actingAs($user)
+            ->get(route('payments.show', $payment))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('payment.subscription.status', Subscription::STATUS_TERMINATED)
+                ->where('paymentCredit.credit_months_purchased', 3)
+                ->where('paymentCredit.presents_consumable_credit', false)
+                ->where('canRenewSubscription', false));
+    }
+
     public function test_pending_payment_does_not_present_consumable_credit(): void
     {
         $user = User::factory()->create();

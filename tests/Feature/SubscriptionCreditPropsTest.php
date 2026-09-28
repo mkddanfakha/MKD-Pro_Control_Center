@@ -234,6 +234,34 @@ class SubscriptionCreditPropsTest extends TestCase
                 ->where('credit.payments.0.credit_months_remaining', 3));
     }
 
+    public function test_show_terminated_with_partially_consumed_payment_reports_zero_available_and_positive_per_payment_remaining(): void
+    {
+        $user = User::factory()->create();
+        $subscription = $this->makeSubscription([
+            'status' => Subscription::STATUS_TERMINATED,
+            'terminated_at' => '2026-11-01 00:00:00',
+        ]);
+        $payment = $this->makePaidPayment($subscription, 90000, 6);
+
+        SubscriptionPaymentConsumption::query()->create([
+            'payment_id' => $payment->id,
+            'subscription_id' => $subscription->id,
+            'period_start' => '2026-10-01 00:00:00',
+            'period_end' => '2026-10-31 23:59:59',
+            'consumed_at' => '2026-10-05 10:00:00',
+        ]);
+
+        $this->actingAs($user)
+            ->get(route('subscriptions.show', $subscription))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('subscription.status', Subscription::STATUS_TERMINATED)
+                ->where('credit.available_months', 0)
+                ->where('credit.payments.0.id', $payment->id)
+                ->where('credit.payments.0.credit_months_remaining', 5)
+                ->where('credit.payments.0.consumptions_count', 1));
+    }
+
     public function test_edit_exposes_zero_payments_and_no_pending(): void
     {
         $user = User::factory()->create();
