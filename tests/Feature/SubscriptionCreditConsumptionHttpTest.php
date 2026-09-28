@@ -88,6 +88,40 @@ class SubscriptionCreditConsumptionHttpTest extends TestCase
         $this->assertSame(1, AuditLog::query()->where('action', 'subscription.credit_consumption_failed')->count());
     }
 
+    public function test_consume_credit_allows_suspended_subscription_and_reactivates_it(): void
+    {
+        $user = User::factory()->create();
+        $subscription = $this->makeSubscription([
+            'status' => Subscription::STATUS_SUSPENDED,
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+            'grace_period_ends_at' => '2026-11-07 23:59:59',
+            'suspended_at' => '2026-11-08 08:00:00',
+        ]);
+
+        $payment = $this->makePaidPayment($subscription, 15000, 1);
+
+        $this->assertSame(Subscription::STATUS_SUSPENDED, $subscription->status);
+        $this->assertNotNull($subscription->suspended_at);
+
+        $response = $this->actingAs($user)->post(route('subscriptions.consume-credit', $subscription));
+
+        $response->assertRedirect(route('subscriptions.show', $subscription));
+        $response->assertSessionHas('success');
+        $response->assertSessionDoesntHaveErrors();
+
+        $subscription->refresh();
+        $payment->refresh();
+
+        $this->assertSame(Subscription::STATUS_ACTIVE, $subscription->status);
+        $this->assertNull($subscription->suspended_at);
+        $this->assertNull($subscription->grace_period_ends_at);
+        $this->assertSame(1, SubscriptionPaymentConsumption::query()->where('payment_id', $payment->id)->count());
+        $this->assertSame(0, $payment->remainingCreditMonths());
+        $this->assertSame('2026-11-01 00:00:00', $subscription->current_period_start->format('Y-m-d H:i:s'));
+        $this->assertSame(1, AuditLog::query()->where('action', 'subscription.credit_consumed')->count());
+    }
+
     public function test_consume_credit_rejects_terminated_subscription(): void
     {
         $user = User::factory()->create();

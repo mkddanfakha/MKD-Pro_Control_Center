@@ -7,6 +7,7 @@ Dernière mise à jour modèle crédit : **25/09/2026** (Tasks 89–100, doc Tas
 Dernière alignement doc / code (Installation ↔ Subscription ↔ Access) : **25/09/2026** (Task 147).
 Dernier alignement doc / tarif (défaut, courant, crédit historique) : **25/09/2026** (Task 183).
 Cycle **paid ↔ refunded** (HTTP, crédit, tarif) : **28/09/2026** (Tasks 199–201).
+Consommation de crédit depuis **`suspended`** (comportement implémenté, tests Task 213) : **28/09/2026**.
 
 ---
 
@@ -232,6 +233,25 @@ Une subscription **`terminated`** :
 - **conserve** l’historique des paiements et des consommations passées ;
 - expose **`available_months = 0`** dans les props Inertia d’affichage (`summarizeSubscriptionCreditForDisplay`), même si des lignes de paiement affichent encore un crédit théorique non consommable.
 
+### Subscription `suspended` et consommation de crédit (comportement actuel)
+
+Une subscription **`suspended`** **n’est pas** un état terminal (contrairement à **`terminated`**).
+
+**Accès installation** (`InstallationAccessService`) :
+
+- tant que le statut reste **`suspended`**, l’accès calculé est **`suspended`** (non autorisé) ;
+- **`grace_period`**, en revanche, reste **`accessible`** tant que la subscription n’est pas suspendue.
+
+**Consommation de crédit** (FIFO ou ciblée, comportement **implémenté aujourd’hui** — voir tests `SubscriptionCreditConsumptionTest`, `SubscriptionCreditConsumptionHttpTest`) :
+
+- si un paiement **`paid`** possède encore du crédit **consommable** (règles habituelles : reste > 0, non remboursé, etc.), la consommation **est autorisée** même lorsque la subscription est **`suspended`** ;
+- **`performCreditConsumption()`** avance **immédiatement** la période suivante (sans attendre l’échéance calendaire de la période courante) ;
+- **`advanceSubscriptionToPeriod()`** remet alors la subscription à **`active`**, efface **`grace_period_ends_at`** et **`suspended_at`**, et **ne modifie pas** **`terminated_at`** ;
+- le crédit du paiement est débité d’**un mois** (ligne **`subscription_payment_consumptions`**) ;
+- une fois le statut repassé à **`active`**, l’accès installation redevient **`accessible`** via le même mécanisme que pour une subscription active.
+
+**Contraste avec `terminated` :** seul **`terminated`** bloque explicitement la consommation dans `SubscriptionService` ; **`suspended`** ne possède **pas** de garde équivalente dans le moteur de crédit actuel.
+
 ### Paiement `refunded` (statut et crédit consommable)
 
 Un paiement **`refunded`** est un encaissement **toujours présent** dans l’historique (`payments`), avec son **`amount`** et ses champs de crédit **persistés** (`monthly_unit_amount`, `credit_months_purchased`). Ce statut décrit la **situation financière déclarée** du paiement, **pas** la suppression du dossier.
@@ -398,6 +418,8 @@ suspended
 
 La **période de grâce** (`grace_period`) reste la **même** subscription ; seul le `status` (et les dates associées) change.
 
+L’état **`suspended`** reste également la **même** ligne `subscriptions` (subscription courante non terminée). Une **consommation de crédit** depuis **`suspended`** peut, dans l’implémentation actuelle, **réactiver** la subscription (`active`) et **lever** les horodatages de grâce/suspension — voir § Subscription `suspended` et consommation de crédit.
+
 ### Indépendance vis-à-vis de l’installation
 
 ```text
@@ -556,6 +578,7 @@ Les inspections antérieures (ex. Task 36, 24/09/2026) peuvent mentionner des su
 | CRUD subscription, consommation FIFO HTTP, props crédit Show | `app/Http/Controllers/SubscriptionController.php` |
 | Paiements, calcul crédit à la création, renouvellement ciblé HTTP | `app/Http/Controllers/PaymentController.php` |
 | Tests HTTP cycle paid ↔ refunded, recalcul crédit | `tests/Feature/PaymentCreditHttpTest.php` |
+| Tests consommation depuis `suspended` (service + HTTP) | `tests/Feature/SubscriptionCreditConsumptionTest.php`, `tests/Feature/SubscriptionCreditConsumptionHttpTest.php` |
 | Sync lifecycle planifié | `app/Console/Commands/SyncSubscriptionLifecycle.php` |
 | UI crédit + consommation globale | `resources/js/Pages/Subscriptions/Show.vue` |
 | UI renouvellement ciblé paiement | `resources/js/Pages/Subscriptions/Payments/Show.vue` |

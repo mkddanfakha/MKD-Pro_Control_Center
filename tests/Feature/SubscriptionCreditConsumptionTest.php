@@ -10,6 +10,7 @@ use App\Models\Subscription;
 use App\Models\SubscriptionPaymentConsumption;
 use App\Models\User;
 use App\Services\SubscriptionService;
+use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Event;
 use Tests\TestCase;
@@ -163,6 +164,181 @@ class SubscriptionCreditConsumptionTest extends TestCase
         $this->expectException(SubscriptionRenewalException::class);
 
         $this->service->consumeCreditFromPayment($payment);
+    }
+
+    public function test_credit_consumption_advances_to_next_period_before_current_period_expires(): void
+    {
+        $subscription = $this->makeSubscription([
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        $currentPeriodEnd = Carbon::parse('2026-10-31 23:59:59');
+        $this->assertTrue(
+            now()->lessThan($currentPeriodEnd),
+            'Le test suppose que la date courante est antérieure à current_period_end.',
+        );
+
+        $payment = $this->makePaidPayment($subscription, 15000, 1);
+
+        $consumption = $this->service->consumeCreditFromPayment($payment);
+
+        $subscription->refresh();
+        $payment->refresh();
+
+        $this->assertSame('2026-11-01 00:00:00', $subscription->current_period_start->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-11-30 23:59:59', $subscription->current_period_end->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-11-01 00:00:00', $consumption->period_start->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-11-30 23:59:59', $consumption->period_end->format('Y-m-d H:i:s'));
+        $this->assertSame(0, $payment->remainingCreditMonths());
+        $this->assertSame(1, SubscriptionPaymentConsumption::query()->where('payment_id', $payment->id)->count());
+    }
+
+    public function test_multiple_credit_consumptions_advance_future_periods_without_waiting(): void
+    {
+        $subscription = $this->makeSubscription([
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        $payment = $this->makePaidPayment($subscription, 30000, 2);
+
+        $first = $this->service->consumeCreditFromPayment($payment);
+        $second = $this->service->consumeCreditFromPayment($payment->fresh());
+
+        $subscription->refresh();
+        $payment->refresh();
+
+        $this->assertSame(2, SubscriptionPaymentConsumption::query()->where('payment_id', $payment->id)->count());
+        $this->assertSame('2026-11-01 00:00:00', $first->period_start->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-11-30 23:59:59', $first->period_end->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-12-01 00:00:00', $second->period_start->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-12-31 23:59:59', $second->period_end->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-12-01 00:00:00', $subscription->current_period_start->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-12-31 23:59:59', $subscription->current_period_end->format('Y-m-d H:i:s'));
+        $this->assertSame(0, $payment->remainingCreditMonths());
+        $this->assertNotNull($payment->credit_exhausted_at);
+    }
+
+    public function test_targeted_credit_consumption_can_use_later_payment_while_older_credit_remains(): void
+    {
+        $subscription = $this->makeSubscription([
+            'amount' => 15000,
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        $paymentA = $this->makePaidPayment($subscription, 30000, 2, [
+            'paid_at' => '2026-09-01 10:00:00',
+        ]);
+
+        $this->updateSubscriptionAmountViaHttp($subscription, 20000);
+
+        $paymentB = $this->makePaidPayment($subscription->fresh(), 40000, 2, [
+            'paid_at' => '2026-09-05 10:00:00',
+        ]);
+
+        $this->assertSame(15000, (int) $paymentA->fresh()->monthly_unit_amount);
+        $this->assertSame(2, $paymentA->fresh()->remainingCreditMonths());
+        $this->assertSame(20000, (int) $paymentB->fresh()->monthly_unit_amount);
+        $this->assertSame(2, $paymentB->fresh()->remainingCreditMonths());
+
+        $fifoProbeSubscription = $this->makeSubscription([
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+        ]);
+
+        $fifoProbeA = $this->makePaidPayment($fifoProbeSubscription, 30000, 2, [
+            'paid_at' => '2026-09-01 10:00:00',
+        ]);
+        $this->makePaidPayment($fifoProbeSubscription, 30000, 2, [
+            'paid_at' => '2026-09-05 10:00:00',
+        ]);
+
+        $fifoProbeConsumption = $this->service->consumeNextCreditForSubscription($fifoProbeSubscription);
+        $this->assertSame($fifoProbeA->id, $fifoProbeConsumption->payment_id);
+
+        $targetedConsumption = $this->service->consumeCreditFromPayment($paymentB->fresh());
+
+        $paymentA->refresh();
+        $paymentB->refresh();
+        $subscription->refresh();
+
+        $this->assertSame($paymentB->id, $targetedConsumption->payment_id);
+        $this->assertSame(2, $paymentA->remainingCreditMonths());
+        $this->assertSame(1, $paymentB->remainingCreditMonths());
+        $this->assertSame(1, SubscriptionPaymentConsumption::query()->where('payment_id', $paymentB->id)->count());
+        $this->assertSame(0, SubscriptionPaymentConsumption::query()->where('payment_id', $paymentA->id)->count());
+        $this->assertSame('2026-11-01 00:00:00', $subscription->current_period_start->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-11-30 23:59:59', $subscription->current_period_end->format('Y-m-d H:i:s'));
+
+        $fifoAfterTargeted = $this->service->consumeNextCreditForSubscription($subscription->fresh());
+
+        $paymentA->refresh();
+        $paymentB->refresh();
+
+        $this->assertSame($paymentA->id, $fifoAfterTargeted->payment_id);
+        $this->assertSame(1, $paymentA->remainingCreditMonths());
+        $this->assertSame(1, $paymentB->remainingCreditMonths());
+        $this->assertSame(1, SubscriptionPaymentConsumption::query()->where('payment_id', $paymentA->id)->count());
+        $this->assertSame(1, SubscriptionPaymentConsumption::query()->where('payment_id', $paymentB->id)->count());
+    }
+
+    public function test_credit_consumption_from_grace_period_reactivates_subscription_and_clears_grace_timestamps(): void
+    {
+        $subscription = $this->makeSubscription([
+            'status' => Subscription::STATUS_GRACE_PERIOD,
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+            'grace_period_ends_at' => '2026-11-07 23:59:59',
+        ]);
+
+        $payment = $this->makePaidPayment($subscription, 15000, 1);
+
+        $this->service->consumeCreditFromPayment($payment);
+
+        $subscription->refresh();
+
+        $this->assertSame(Subscription::STATUS_ACTIVE, $subscription->status);
+        $this->assertNull($subscription->grace_period_ends_at);
+        $this->assertNull($subscription->suspended_at);
+        $this->assertSame('2026-11-01 00:00:00', $subscription->current_period_start->format('Y-m-d H:i:s'));
+    }
+
+    public function test_credit_consumption_from_suspended_reactivates_subscription_and_clears_suspended_at(): void
+    {
+        $subscription = $this->makeSubscription([
+            'status' => Subscription::STATUS_SUSPENDED,
+            'current_period_start' => '2026-10-01 00:00:00',
+            'current_period_end' => '2026-10-31 23:59:59',
+            'grace_period_ends_at' => '2026-11-07 23:59:59',
+            'suspended_at' => '2026-11-08 08:00:00',
+            'terminated_at' => null,
+        ]);
+
+        $payment = $this->makePaidPayment($subscription, 15000, 1);
+
+        $this->assertSame(Subscription::STATUS_SUSPENDED, $subscription->status);
+        $this->assertNotNull($subscription->suspended_at);
+        $this->assertSame(1, $payment->remainingCreditMonths());
+        $this->assertTrue($this->service->canConsumeCreditFromPayment($payment));
+
+        $consumption = $this->service->consumeCreditFromPayment($payment);
+
+        $subscription->refresh();
+        $payment->refresh();
+
+        $this->assertSame(Subscription::STATUS_ACTIVE, $subscription->status);
+        $this->assertNull($subscription->suspended_at);
+        $this->assertNull($subscription->grace_period_ends_at);
+        $this->assertNull($subscription->terminated_at);
+        $this->assertSame('2026-11-01 00:00:00', $subscription->current_period_start->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-11-30 23:59:59', $subscription->current_period_end->format('Y-m-d H:i:s'));
+        $this->assertSame($payment->id, $consumption->payment_id);
+        $this->assertSame('2026-11-01 00:00:00', $consumption->period_start->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-11-30 23:59:59', $consumption->period_end->format('Y-m-d H:i:s'));
+        $this->assertSame(1, SubscriptionPaymentConsumption::query()->where('payment_id', $payment->id)->count());
+        $this->assertSame(0, $payment->remainingCreditMonths());
     }
 
     public function test_two_consecutive_consumptions_open_two_different_periods(): void
