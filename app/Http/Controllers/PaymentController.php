@@ -531,6 +531,9 @@ class PaymentController extends Controller
         $isPaid = $payment->isPaid();
         $isRefunded = $payment->isRefunded();
 
+        $subscription = $payment->relationLoaded('subscription') ? $payment->subscription : null;
+        $isSubscriptionTerminated = $subscription !== null && $subscription->isTerminated();
+
         return [
             'amount' => (int) $payment->amount,
             'currency' => (string) $payment->currency,
@@ -542,7 +545,7 @@ class PaymentController extends Controller
             'status' => (string) $payment->status,
             'is_refunded' => $isRefunded,
             'is_paid' => $isPaid,
-            'presents_consumable_credit' => $isPaid && ! $isRefunded && $remaining > 0 && $hasCreditDefinition,
+            'presents_consumable_credit' => $isPaid && ! $isRefunded && $remaining > 0 && $hasCreditDefinition && ! $isSubscriptionTerminated,
             'is_exhausted' => $hasCreditDefinition && $remaining === 0 && $consumptionsCount > 0,
             'show_credit_details' => $hasCreditDefinition || $consumptionsCount > 0,
             'consumptions' => $consumptions,

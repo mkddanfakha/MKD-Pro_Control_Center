@@ -174,7 +174,7 @@ class PaymentShowCreditPropsTest extends TestCase
                 ->where('payment.subscription.status', Subscription::STATUS_TERMINATED)
                 ->where('paymentCredit.credit_months_purchased', 3)
                 ->where('paymentCredit.credit_months_remaining', 3)
-                ->where('paymentCredit.presents_consumable_credit', true)
+                ->where('paymentCredit.presents_consumable_credit', false)
                 ->where('canRenewSubscription', false));
     }
 
@@ -200,6 +200,10 @@ class PaymentShowCreditPropsTest extends TestCase
             'terminated_at' => '2026-11-01 00:00:00',
         ]);
 
+        $consumptionsBefore = SubscriptionPaymentConsumption::query()
+            ->where('payment_id', $payment->id)
+            ->count();
+
         $this->actingAs($user)
             ->get(route('payments.show', $payment))
             ->assertOk()
@@ -207,8 +211,13 @@ class PaymentShowCreditPropsTest extends TestCase
                 ->where('payment.subscription.status', Subscription::STATUS_TERMINATED)
                 ->where('paymentCredit.consumptions_count', 1)
                 ->where('paymentCredit.credit_months_remaining', 5)
-                ->where('paymentCredit.presents_consumable_credit', true)
+                ->where('paymentCredit.presents_consumable_credit', false)
                 ->where('canRenewSubscription', false));
+
+        $this->assertSame(
+            $consumptionsBefore,
+            SubscriptionPaymentConsumption::query()->where('payment_id', $payment->id)->count(),
+        );
     }
 
     public function test_show_terminated_refunded_payment_does_not_present_consumable_credit(): void

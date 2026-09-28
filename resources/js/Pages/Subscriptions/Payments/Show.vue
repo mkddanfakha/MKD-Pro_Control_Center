@@ -202,6 +202,34 @@ function consumedMonthsLabel(count) {
     return `${value} mois consommés`;
 }
 
+const isTerminatedSubscriptionWithHistoricalCredit = computed(() => {
+    if (!props.paymentCredit.is_paid || props.paymentCredit.is_refunded) {
+        return false;
+    }
+
+    if (props.payment.subscription?.status !== 'terminated') {
+        return false;
+    }
+
+    const remaining = Number(props.paymentCredit.credit_months_remaining);
+
+    return !Number.isNaN(remaining) && remaining > 0;
+});
+
+function historicalCreditMonthsLabel(count) {
+    const value = Number(count);
+
+    if (Number.isNaN(value)) {
+        return '—';
+    }
+
+    if (value === 1) {
+        return '1 mois de crédit historique';
+    }
+
+    return `${value} mois de crédit historique`;
+}
+
 function remainingMonthsLabel(count) {
     const value = Number(count);
 
@@ -609,6 +637,12 @@ function paymentMethodLabel(method) {
                                     —
                                     <span class="mt-1 block text-xs font-normal text-gray-500">
                                         Non consommable (remboursé).
+                                    </span>
+                                </template>
+                                <template v-else-if="isTerminatedSubscriptionWithHistoricalCredit">
+                                    {{ historicalCreditMonthsLabel(paymentCredit.credit_months_remaining) }}
+                                    <span class="mt-1 block text-xs font-normal text-gray-500">
+                                        Non consommable : l’abonnement est terminé.
                                     </span>
                                 </template>
                                 <template v-else-if="!paymentCredit.is_paid">
