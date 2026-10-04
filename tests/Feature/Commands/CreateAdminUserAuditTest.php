@@ -5,6 +5,7 @@ namespace Tests\Feature\Commands;
 use App\Models\AuditLog;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Config;
 use RuntimeException;
 use Tests\TestCase;
 
@@ -12,13 +13,15 @@ class CreateAdminUserAuditTest extends TestCase
 {
     use RefreshDatabase;
 
-    private const ADMIN_NAME_QUESTION = 'Nom de l’administrateur';
+    private const ADMIN_EMAIL = 'admin-audit@example.test';
 
-    private const ADMIN_EMAIL_QUESTION = 'Adresse e-mail';
+    private const ADMIN_NAME_QUESTION = 'Nom de l’administrateur';
 
     protected function setUp(): void
     {
         parent::setUp();
+
+        Config::set('control_center.admin_email', self::ADMIN_EMAIL);
 
         $this->app->forgetInstance('request');
     }
@@ -34,12 +37,11 @@ class CreateAdminUserAuditTest extends TestCase
     {
         $this->artisan('app:create-admin-user')
             ->expectsQuestion(self::ADMIN_NAME_QUESTION, 'Admin Audit')
-            ->expectsQuestion(self::ADMIN_EMAIL_QUESTION, 'admin-audit@example.com')
             ->expectsQuestion('Mot de passe', 'cli-test-pass-8')
             ->expectsQuestion('Confirmer le mot de passe', 'cli-test-pass-8')
             ->assertSuccessful();
 
-        $user = User::query()->where('email', 'admin-audit@example.com')->firstOrFail();
+        $user = User::query()->where('email', self::ADMIN_EMAIL)->firstOrFail();
 
         $log = AuditLog::query()->where('action', 'user.created')->sole();
 
@@ -49,7 +51,7 @@ class CreateAdminUserAuditTest extends TestCase
         $this->assertNull($log->old_values);
         $this->assertSame($user->id, $log->new_values['id']);
         $this->assertSame('Admin Audit', $log->new_values['name']);
-        $this->assertSame('admin-audit@example.com', $log->new_values['email']);
+        $this->assertSame(self::ADMIN_EMAIL, $log->new_values['email']);
         $this->assertSame(['id', 'name', 'email'], array_keys($log->new_values));
         $this->assertNull($log->user_id);
         $this->assertNull($log->ip_address);
@@ -60,11 +62,9 @@ class CreateAdminUserAuditTest extends TestCase
 
     public function test_duplicate_email_does_not_create_user_audit(): void
     {
-        User::factory()->create(['email' => 'existing@example.com']);
+        User::factory()->create(['email' => self::ADMIN_EMAIL]);
 
         $this->artisan('app:create-admin-user')
-            ->expectsQuestion(self::ADMIN_NAME_QUESTION, 'Autre Admin')
-            ->expectsQuestion(self::ADMIN_EMAIL_QUESTION, 'existing@example.com')
             ->assertFailed();
 
         $this->assertSame(0, AuditLog::query()->count());
@@ -78,18 +78,17 @@ class CreateAdminUserAuditTest extends TestCase
 
         $this->artisan('app:create-admin-user')
             ->expectsQuestion(self::ADMIN_NAME_QUESTION, 'Admin Échec')
-            ->expectsQuestion(self::ADMIN_EMAIL_QUESTION, 'fail-audit@example.com')
             ->expectsQuestion('Mot de passe', 'cli-test-pass-8')
             ->expectsQuestion('Confirmer le mot de passe', 'cli-test-pass-8')
             ->assertFailed();
 
-        $this->assertSame(0, User::query()->where('email', 'fail-audit@example.com')->count());
+        $this->assertSame(0, User::query()->where('email', self::ADMIN_EMAIL)->count());
 
         $log = AuditLog::query()->where('action', 'user.create_failed')->sole();
 
         $this->assertSame('failure', $log->result);
         $this->assertSame('Admin Échec', $log->new_values['name']);
-        $this->assertSame('fail-audit@example.com', $log->new_values['email']);
+        $this->assertSame(self::ADMIN_EMAIL, $log->new_values['email']);
         $this->assertSame(['name', 'email'], array_keys($log->new_values));
         $this->assertSame('L’opération de création de l’administrateur a échoué.', $log->error_message);
         $this->assertStringNotContainsString('Échec simulé de persistance', (string) $log->error_message);

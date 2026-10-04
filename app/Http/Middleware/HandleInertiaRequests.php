@@ -3,6 +3,7 @@
 namespace App\Http\Middleware;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 use Inertia\Inertia;
 use Inertia\Middleware;
 
@@ -55,6 +56,17 @@ class HandleInertiaRequests extends Middleware
                 ]
                 : null,
         ],
+
+        'admin_urls' => fn (): ?array => $request->user() !== null && Gate::check('accessControlCenter')
+            ? [
+                'dashboard' => route('dashboard'),
+                'clients_index' => route('clients.index'),
+                'installations_index' => route('installations.index'),
+                'subscriptions_index' => route('subscriptions.index'),
+                'payments_index' => route('payments.index'),
+                'audit_logs_index' => route('audit-logs.index'),
+            ]
+            : null,
     ];
     }
 }

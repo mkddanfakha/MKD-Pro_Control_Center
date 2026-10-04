@@ -22,14 +22,21 @@ class CreateAdminUser extends Command
 
     public function handle(): int
     {
-        $name = $this->ask('Nom de l’administrateur');
-        $email = $this->ask('Adresse e-mail');
+        $email = $this->configuredControlCenterAdminEmail();
 
-        if (User::where('email', $email)->exists()) {
-            $this->error('Un utilisateur existe déjà avec cette adresse e-mail.');
+        if ($email === null) {
+            $this->error('CONTROL_CENTER_ADMIN_EMAIL est absent ou vide. Configurez l’adresse administrateur avant de créer le compte.');
 
             return self::FAILURE;
         }
+
+        if (User::query()->whereRaw('LOWER(TRIM(email)) = ?', [$email])->exists()) {
+            $this->error('Un utilisateur existe déjà avec l’adresse e-mail administrateur configurée.');
+
+            return self::FAILURE;
+        }
+
+        $name = $this->ask('Nom de l’administrateur');
 
         $password = $this->secret('Mot de passe');
         $passwordConfirmation = $this->secret('Confirmer le mot de passe');
@@ -93,5 +100,18 @@ class CreateAdminUser extends Command
             'name' => $user->name,
             'email' => $user->email,
         ];
+    }
+
+    private function configuredControlCenterAdminEmail(): ?string
+    {
+        $email = config('control_center.admin_email');
+
+        if (! is_string($email)) {
+            return null;
+        }
+
+        $email = strtolower(trim($email));
+
+        return $email === '' ? null : $email;
     }
 }

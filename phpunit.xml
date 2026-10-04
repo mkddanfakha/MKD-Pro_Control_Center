@@ -32,5 +32,6 @@
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
+        <env name="CONTROL_CENTER_ADMIN_EMAIL" value="admin@control-center.test"/>
     </php>
 </phpunit>

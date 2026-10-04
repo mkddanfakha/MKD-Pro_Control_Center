@@ -42,4 +42,29 @@ class UserFactory extends Factory
             'email_verified_at' => null,
         ]);
     }
+
+    /**
+     * User e-mail matches configured Control Center administrator.
+     */
+    public function controlCenterAdmin(): static
+    {
+        return $this->state(function (): array {
+            return [
+                'email' => $this->configuredControlCenterAdminEmail() ?? 'admin@control-center.test',
+            ];
+        });
+    }
+
+    private function configuredControlCenterAdminEmail(): ?string
+    {
+        $email = config('control_center.admin_email');
+
+        if (! is_string($email)) {
+            return null;
+        }
+
+        $email = strtolower(trim($email));
+
+        return $email === '' ? null : $email;
+    }
 }
