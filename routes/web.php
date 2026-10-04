@@ -22,25 +22,56 @@ Route::get('/login', function () {
 })->name('login');
 
 Route::middleware('auth')->group(function () {
-    Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
+    Route::get('/dashboard', [DashboardController::class, 'index'])
+        ->middleware('can:accessControlCenter')
+        ->name('dashboard');
 
-    Route::get('/audit-logs', [AuditLogController::class, 'index'])->name('audit-logs.index');
+    Route::get('/audit-logs', [AuditLogController::class, 'index'])
+        ->middleware('can:accessControlCenter')
+        ->name('audit-logs.index');
 
-    Route::resource('clients', ClientController::class);
+    Route::middleware('can:accessControlCenter')->group(function (): void {
+        Route::get('clients', [ClientController::class, 'index'])->name('clients.index');
+        Route::resource('clients', ClientController::class)->except(['index', 'show']);
+        Route::get('clients/{client}', [ClientController::class, 'show'])->name('clients.show');
 
-    Route::resource('installations', InstallationController::class);
+        Route::get('installations', [InstallationController::class, 'index'])->name('installations.index');
+        Route::resource('installations', InstallationController::class)->except(['index', 'show']);
+        Route::get('installations/{installation}', [InstallationController::class, 'show'])->name('installations.show');
+
+        Route::resource('modules', ModuleController::class);
+        Route::resource('installation-modules', InstallationModuleController::class);
+    });
+
+    Route::get('subscriptions', [SubscriptionController::class, 'index'])
+        ->middleware('can:accessControlCenter')
+        ->name('subscriptions.index');
 
     Route::post('subscriptions/{subscription}/consume-credit', [SubscriptionController::class, 'consumeCredit'])
+        ->middleware('can:accessControlCenter')
         ->name('subscriptions.consume-credit');
 
-    Route::resource('subscriptions', SubscriptionController::class);
+    Route::middleware('can:accessControlCenter')->group(function (): void {
+        Route::resource('subscriptions', SubscriptionController::class)->except(['index', 'show']);
+    });
+
+    Route::get('subscriptions/{subscription}', [SubscriptionController::class, 'show'])
+        ->middleware('can:accessControlCenter')
+        ->name('subscriptions.show');
+
+    Route::get('payments', [PaymentController::class, 'index'])
+        ->middleware('can:accessControlCenter')
+        ->name('payments.index');
 
     Route::post('payments/{payment}/renew-subscription', [PaymentController::class, 'renewSubscription'])
+        ->middleware('can:accessControlCenter')
         ->name('payments.renew-subscription');
 
-    Route::resource('payments', PaymentController::class);
+    Route::middleware('can:accessControlCenter')->group(function (): void {
+        Route::resource('payments', PaymentController::class)->except(['index', 'show']);
+    });
 
-    Route::resource('modules', ModuleController::class);
-
-    Route::resource('installation-modules', InstallationModuleController::class);
+    Route::get('payments/{payment}', [PaymentController::class, 'show'])
+        ->middleware('can:accessControlCenter')
+        ->name('payments.show');
 });
