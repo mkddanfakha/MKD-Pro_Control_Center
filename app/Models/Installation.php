@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\InstallationModule;
+use App\Models\ProvisioningRun;
 use App\Models\Subscription;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -51,5 +52,10 @@ class Installation extends Model
     public function installationModules(): HasMany
     {
         return $this->hasMany(InstallationModule::class);
+    }
+
+    public function provisioningRuns(): HasMany
+    {
+        return $this->hasMany(ProvisioningRun::class);
     }
 }

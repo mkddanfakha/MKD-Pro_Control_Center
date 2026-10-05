@@ -64,6 +64,30 @@ return [
             ]) : [],
         ],
 
+        /*
+         * Base MySQL dédiée aux migrations/tests provisioning (TASK 336+).
+         * Ne pas pointer vers mkdpro_control.
+         */
+        'provisioning_test' => [
+            'driver' => 'mysql',
+            'url' => env('PROVISIONING_TEST_DB_URL'),
+            'host' => env('PROVISIONING_TEST_DB_HOST', env('DB_HOST', '127.0.0.1')),
+            'port' => env('PROVISIONING_TEST_DB_PORT', env('DB_PORT', '3306')),
+            'database' => env('PROVISIONING_TEST_DB_DATABASE', 'mkdpro_control_provisioning_test'),
+            'username' => env('PROVISIONING_TEST_DB_USERNAME', env('DB_USERNAME', 'root')),
+            'password' => env('PROVISIONING_TEST_DB_PASSWORD', env('DB_PASSWORD', '')),
+            'unix_socket' => env('PROVISIONING_TEST_DB_SOCKET', env('DB_SOCKET', '')),
+            'charset' => env('PROVISIONING_TEST_DB_CHARSET', env('DB_CHARSET', 'utf8mb4')),
+            'collation' => env('PROVISIONING_TEST_DB_COLLATION', env('DB_COLLATION', 'utf8mb4_unicode_ci')),
+            'prefix' => '',
+            'prefix_indexes' => true,
+            'strict' => true,
+            'engine' => 'InnoDB',
+            'options' => extension_loaded('pdo_mysql') ? array_filter([
+                \Pdo\Mysql::ATTR_SSL_CA => env('MYSQL_ATTR_SSL_CA'),
+            ]) : [],
+        ],
+
         'mariadb' => [
             'driver' => 'mariadb',
             'url' => env('DB_URL'),
