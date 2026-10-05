@@ -138,3 +138,54 @@ export function installationModuleStatusLabel(status) {
 export function installationModuleStatusBadgeClass(status) {
     return moduleCatalogStatusBadgeClass(status);
 }
+export function provisioningRunStatusLabel(status) {
+    const labels = {
+        pending: 'Demande en attente',
+        running: 'Provisioning en cours',
+        succeeded: 'Provisioning terminé',
+        failed: 'Provisioning échoué',
+        manual_intervention_required: 'Intervention manuelle nécessaire',
+        cancelled: 'Demande annulée',
+    };
+
+    return labels[status] ?? status;
+}
+
+export function provisioningRunStatusBadgeClass(status) {
+    const classes = {
+        pending: 'bg-amber-50 text-amber-900 ring-amber-200',
+        running: 'bg-sky-50 text-sky-800 ring-sky-200',
+        succeeded: 'bg-emerald-50 text-emerald-800 ring-emerald-200',
+        failed: 'bg-red-50 text-red-800 ring-red-200',
+        manual_intervention_required: 'bg-orange-50 text-orange-900 ring-orange-200',
+        cancelled: 'bg-gray-100 text-gray-700 ring-gray-300',
+    };
+
+    return classes[status] ?? 'bg-gray-100 text-gray-600 ring-gray-200';
+}
+
+export function provisioningRunStepStatusLabel(status) {
+    const labels = {
+        pending: 'En attente',
+        running: 'En cours',
+        succeeded: 'Réussie',
+        failed: 'Échouée',
+        manual_intervention_required: 'Intervention manuelle',
+        skipped: 'Ignorée',
+    };
+
+    return labels[status] ?? status;
+}
+
+export function provisioningRunStepStatusBadgeClass(status) {
+    const classes = {
+        pending: 'bg-amber-50 text-amber-900 ring-amber-200',
+        running: 'bg-sky-50 text-sky-800 ring-sky-200',
+        succeeded: 'bg-emerald-50 text-emerald-800 ring-emerald-200',
+        failed: 'bg-red-50 text-red-800 ring-red-200',
+        manual_intervention_required: 'bg-orange-50 text-orange-900 ring-orange-200',
+        skipped: 'bg-gray-100 text-gray-700 ring-gray-300',
+    };
+
+    return classes[status] ?? 'bg-gray-100 text-gray-600 ring-gray-200';
+}

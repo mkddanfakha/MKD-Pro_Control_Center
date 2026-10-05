@@ -40,7 +40,10 @@ class ProvisioningPipelineArchitectureTest extends TestCase
         $routes = collect(Route::getRoutes())->filter(
             fn ($route) => str_contains((string) $route->getName(), 'provisioning'),
         );
-        $this->assertCount(0, $routes);
+        $this->assertCount(3, $routes);
+        $this->assertNotNull($routes->firstWhere(fn ($route) => $route->getName() === 'installations.provisioning-runs.store'));
+        $this->assertNotNull($routes->firstWhere(fn ($route) => $route->getName() === 'provisioning-runs.show'));
+        $this->assertNotNull($routes->firstWhere(fn ($route) => $route->getName() === 'provisioning-runs.execute'));
         $provisioningSchedule = collect(Schedule::events())
             ->map(fn ($e) => $e->command ?? '')
             ->filter(fn (string $c) => str_contains($c, 'provisioning'));

@@ -36,7 +36,7 @@ class ProvisioningAuditTrailArchitectureTest extends TestCase
                 || str_contains((string) $route->getName(), 'installations.provisioning-runs'),
         );
 
-        $this->assertCount(0, $routes);
+        $this->assertCount(3, $routes);
     }
 
     public function test_scheduler_unchanged_for_audit_task(): void

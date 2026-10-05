@@ -3,6 +3,8 @@ import AdminLayout from '@/Layouts/AdminLayout.vue';
 import {
     displayAdminValue,
     formatAdminDateTimeUtc,
+    provisioningRunStatusBadgeClass,
+    provisioningRunStatusLabel,
 } from '@/lib/adminPresentation.js';
 import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import { ref } from 'vue';
@@ -40,12 +42,28 @@ const props = defineProps({
         type: Object,
         default: null,
     },
-
+    last_provisioning_run: {
+        type: Object,
+        default: null,
+    },
+    provisioning_actions: {
+        type: Object,
+        default: () => ({
+            can_create_request: false,
+            unavailable_reason: null,
+            button_label: 'Créer une demande de provisioning',
+            retry_basis_run_id: null,
+            store_url: null,
+        }),
+    },
 });
 
 const page = usePage();
 const deleting = ref(false);
 const showDeleteConfirm = ref(false);
+const creatingProvisioningRequest = ref(false);
+const showProvisioningConfirm = ref(false);
+
 function cancelDelete() {
     if (deleting.value) {
         return;
@@ -69,6 +87,33 @@ function confirmDelete() {
     });
 }
 
+function cancelProvisioningConfirm() {
+    if (creatingProvisioningRequest.value) {
+        return;
+    }
+
+    showProvisioningConfirm.value = false;
+}
+
+function confirmCreateProvisioningRequest() {
+    if (creatingProvisioningRequest.value || !props.provisioning_actions.can_create_request) {
+        return;
+    }
+
+    if (!props.provisioning_actions.store_url) {
+        return;
+    }
+
+    creatingProvisioningRequest.value = true;
+
+    router.post(props.provisioning_actions.store_url, {}, {
+        preserveScroll: true,
+        onFinish: () => {
+            creatingProvisioningRequest.value = false;
+            showProvisioningConfirm.value = false;
+        },
+    });
+}
 
 function displayValue(value) {
     return value && String(value).trim() !== '' ? value : '—';
@@ -428,6 +473,176 @@ function readinessStateClass(state) {
                     non suivi actuellement (aucun ✓ déployé).
                 </p>
             </section>
+
+            <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">
+                <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                        <h2 class="text-lg font-semibold text-gray-900">
+                            Provisioning
+                        </h2>
+                        <p class="mt-1 text-sm text-gray-500">
+                            Demande et suivi du dernier run — aucune exécution automatique depuis cette page.
+                        </p>
+                    </div>
+                    <button
+                        v-if="provisioning_actions.can_create_request"
+                        type="button"
+                        class="inline-flex shrink-0 items-center justify-center rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-gray-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2 disabled:opacity-60"
+                        :disabled="creatingProvisioningRequest"
+                        @click="showProvisioningConfirm = true"
+                    >
+                        {{ provisioning_actions.button_label }}
+                    </button>
+                </div>
+
+                <p
+                    v-if="provisioning_actions.retry_basis_run_id"
+                    class="mt-4 text-sm text-gray-600"
+                >
+                    Nouvelle demande basée sur le run #{{ provisioning_actions.retry_basis_run_id }}
+                </p>
+
+                <p
+                    v-if="!provisioning_actions.can_create_request && provisioning_actions.unavailable_reason"
+                    class="mt-4 text-sm text-amber-900"
+                >
+                    {{ provisioning_actions.unavailable_reason }}
+                </p>
+
+                <div
+                    v-if="!last_provisioning_run"
+                    class="mt-6 rounded-lg border border-dashed border-gray-200 bg-gray-50/80 px-4 py-6 text-sm text-gray-600"
+                >
+                    Aucune demande de provisioning enregistrée pour cette installation.
+                </div>
+
+                <dl
+                    v-else
+                    class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
+                >
+                    <div>
+                        <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                            Statut
+                        </dt>
+                        <dd class="mt-1">
+                            <span
+                                class="inline-flex rounded-md px-2 py-0.5 text-xs font-medium ring-1 ring-inset"
+                                :class="provisioningRunStatusBadgeClass(last_provisioning_run.status)"
+                            >
+                                {{ provisioningRunStatusLabel(last_provisioning_run.status) }}
+                            </span>
+                        </dd>
+                    </div>
+                    <div>
+                        <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                            Run #
+                        </dt>
+                        <dd class="mt-1 text-sm text-gray-900 tabular-nums">
+                            {{ last_provisioning_run.id }}
+                        </dd>
+                    </div>
+                    <div>
+                        <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                            Étapes
+                        </dt>
+                        <dd class="mt-1 text-sm text-gray-900 tabular-nums">
+                            {{ last_provisioning_run.steps_completed ?? 0 }} / {{ last_provisioning_run.steps_total ?? 0 }}
+                        </dd>
+                    </div>
+                    <div>
+                        <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                            Créée le (UTC)
+                        </dt>
+                        <dd class="mt-1 text-sm text-gray-900">
+                            {{ formatAdminDateTimeUtc(last_provisioning_run.created_at) }}
+                        </dd>
+                    </div>
+                    <div>
+                        <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                            Début (UTC)
+                        </dt>
+                        <dd class="mt-1 text-sm text-gray-900">
+                            {{ formatAdminDateTimeUtc(last_provisioning_run.started_at) }}
+                        </dd>
+                    </div>
+                    <div>
+                        <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                            Fin (UTC)
+                        </dt>
+                        <dd class="mt-1 text-sm text-gray-900">
+                            {{ formatAdminDateTimeUtc(last_provisioning_run.finished_at) }}
+                        </dd>
+                    </div>
+                    <div
+                        v-if="last_provisioning_run.error_message"
+                        class="sm:col-span-2 lg:col-span-3"
+                    >
+                        <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                            Message
+                        </dt>
+                        <dd class="mt-1 text-sm text-gray-900">
+                            {{ displayAdminValue(last_provisioning_run.error_message) }}
+                        </dd>
+                    </div>
+                </dl>
+
+                <div
+                    v-if="last_provisioning_run?.show_url"
+                    class="mt-6"
+                >
+                    <Link
+                        :href="last_provisioning_run.show_url"
+                        class="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2"
+                    >
+                        Voir le provisioning
+                    </Link>
+                </div>
+            </section>
+
+            <div
+                v-if="showProvisioningConfirm"
+                class="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/50 p-4"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="provisioning-confirm-title"
+            >
+                <div class="w-full max-w-md rounded-xl bg-white p-6 shadow-xl ring-1 ring-gray-200">
+                    <h3
+                        id="provisioning-confirm-title"
+                        class="text-lg font-semibold text-gray-900"
+                    >
+                        Confirmer la demande
+                    </h3>
+                    <p class="mt-2 text-sm text-gray-600">
+                        Une demande de provisioning sera enregistrée en état « en attente ». Aucune exécution
+                        automatique du pipeline ne sera lancée.
+                    </p>
+                    <p
+                        v-if="provisioning_actions.retry_basis_run_id"
+                        class="mt-2 text-sm text-gray-600"
+                    >
+                        Nouvelle demande basée sur le run #{{ provisioning_actions.retry_basis_run_id }}.
+                    </p>
+                    <div class="mt-6 flex flex-wrap justify-end gap-3">
+                        <button
+                            type="button"
+                            class="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                            :disabled="creatingProvisioningRequest"
+                            @click="cancelProvisioningConfirm"
+                        >
+                            Annuler
+                        </button>
+                        <button
+                            type="button"
+                            class="rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-60"
+                            :disabled="creatingProvisioningRequest"
+                            @click="confirmCreateProvisioningRequest"
+                        >
+                            {{ creatingProvisioningRequest ? 'Enregistrement…' : 'Confirmer' }}
+                        </button>
+                    </div>
+                </div>
+            </div>
 
             <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">
                 <h2 class="text-lg font-semibold text-gray-900">

@@ -2,13 +2,18 @@
 
 namespace App\Http\Controllers;
 
+use App\Exceptions\Provisioning\ProvisioningRunCreationException;
 use App\Models\Client;
 use App\Models\Installation;
 use App\Models\InstallationModule;
 use App\Models\Payment;
+use App\Models\ProvisioningRun;
+use App\Models\ProvisioningRunStep;
 use App\Models\Subscription;
 use App\Models\SubscriptionReminder;
 use App\Support\AdminActionAvailability;
+use App\Services\Provisioning\ProvisioningExecutionAuditService;
+use App\Services\Provisioning\ProvisioningRunFactory;
 use App\Services\AuditLogService;
 use App\Services\InstallationAccessService;
 use App\Services\SubscriptionService;
@@ -25,6 +30,8 @@ class InstallationController extends Controller
         private readonly AuditLogService $auditLogService,
         private readonly InstallationAccessService $installationAccessService,
         private readonly SubscriptionService $subscriptionService,
+        private readonly ProvisioningRunFactory $provisioningRunFactory,
+        private readonly ProvisioningExecutionAuditService $provisioningExecutionAuditService,
     ) {}
 
     /**
@@ -242,6 +249,22 @@ class InstallationController extends Controller
 
         $installationModules = $this->serializeInstallationModules($installation);
 
+        $lastProvisioningRun = ProvisioningRun::query()
+            ->where('installation_id', $installation->id)
+            ->withCount([
+                'steps',
+                'steps as steps_completed_count' => fn ($query) => $query->whereIn('status', [
+                    ProvisioningRunStep::STATUS_SUCCEEDED,
+                    ProvisioningRunStep::STATUS_SKIPPED,
+                    ProvisioningRunStep::STATUS_FAILED,
+                    ProvisioningRunStep::STATUS_MANUAL_INTERVENTION_REQUIRED,
+                ]),
+            ])
+            ->orderByDesc('id')
+            ->first();
+
+        $provisioningAvailability = $this->provisioningRunFactory
+            ->describeCreateRequestAvailability($installation);
 
         return Inertia::render('Installations/Show', [
             'installation' => $this->serializeInstallationForAdminDetail($installation),
@@ -272,9 +295,41 @@ class InstallationController extends Controller
                 AdminActionAvailability::installation($installation),
                 ['edit' => route('installations.edit', $installation)],
             ),
+            'last_provisioning_run' => $this->serializeLastProvisioningRunForShow($lastProvisioningRun),
+            'provisioning_actions' => [
+                'can_create_request' => $provisioningAvailability['can_create_request'],
+                'unavailable_reason' => $provisioningAvailability['unavailable_reason'],
+                'button_label' => $provisioningAvailability['button_label'],
+                'retry_basis_run_id' => $provisioningAvailability['retry_basis_run_id'],
+                'store_url' => route('installations.provisioning-runs.store', $installation),
+            ],
         ]);
     }
 
+    /**
+     * Crée une demande de provisioning (pending) sans exécuter le pipeline.
+     */
+    public function storeProvisioningRun(Installation $installation): RedirectResponse
+    {
+        try {
+            $run = $this->provisioningRunFactory->createRequest($installation, auth()->id());
+            $this->provisioningExecutionAuditService->recordRequestCreated($run);
+            if ($run->retry_of_run_id !== null) {
+                $this->provisioningExecutionAuditService->recordRetryCreated($run);
+            }
+        } catch (ProvisioningRunCreationException $exception) {
+            return redirect()
+                ->route('installations.show', $installation)
+                ->with('error', $exception->getMessage());
+        }
+
+        return redirect()
+            ->route('installations.show', $installation)
+            ->with(
+                'success',
+                'Demande de provisioning enregistrée. Aucune exécution automatique n\'a été lancée.',
+            );
+    }
 
     /**
      * Show the form for editing the specified resource.
@@ -654,6 +709,30 @@ class InstallationController extends Controller
                         : 'Aucun paiement enregistré',
                 ],
             ],
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function serializeLastProvisioningRunForShow(?ProvisioningRun $run): ?array
+    {
+        if ($run === null) {
+            return null;
+        }
+
+        return [
+            'id' => $run->id,
+            'status' => $run->status,
+            'trigger' => $run->trigger,
+            'retry_of_run_id' => $run->retry_of_run_id,
+            'error_message' => $run->error_message,
+            'created_at' => $this->formatDateTimeValue($run->created_at),
+            'started_at' => $this->formatDateTimeValue($run->started_at),
+            'finished_at' => $this->formatDateTimeValue($run->finished_at),
+            'steps_total' => (int) ($run->steps_count ?? 0),
+            'steps_completed' => (int) ($run->steps_completed_count ?? 0),
+            'show_url' => route('provisioning-runs.show', $run),
         ];
     }
 

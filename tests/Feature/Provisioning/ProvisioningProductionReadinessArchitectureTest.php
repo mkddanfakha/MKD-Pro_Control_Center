@@ -93,7 +93,7 @@ class ProvisioningProductionReadinessArchitectureTest extends TestCase
             fn ($route) => str_contains((string) $route->getName(), 'provisioning-runs')
                 || str_contains((string) $route->getName(), 'installations.provisioning-runs'),
         );
-        $this->assertCount(0, $routes);
+        $this->assertCount(3, $routes);
 
         $subscriptionTasks = collect(Schedule::events())
             ->map(fn ($event) => $event->command ?? '')

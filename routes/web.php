@@ -10,6 +10,7 @@ use App\Http\Controllers\InstallationController;
 use App\Http\Controllers\InstallationModuleController;
 use App\Http\Controllers\ModuleController;
 use App\Http\Controllers\PaymentController;
+use App\Http\Controllers\ProvisioningRunController;
 use App\Http\Controllers\SubscriptionController;
 use App\Http\Controllers\SubscriptionReminderController;
 use Illuminate\Support\Facades\Route;
@@ -42,6 +43,12 @@ Route::middleware('auth')->group(function () {
         Route::get('installations', [InstallationController::class, 'index'])->name('installations.index');
         Route::resource('installations', InstallationController::class)->except(['index', 'show']);
         Route::get('installations/{installation}', [InstallationController::class, 'show'])->name('installations.show');
+        Route::post('installations/{installation}/provisioning-runs', [InstallationController::class, 'storeProvisioningRun'])
+            ->name('installations.provisioning-runs.store');
+        Route::get('provisioning-runs/{provisioning_run}', [ProvisioningRunController::class, 'show'])
+            ->name('provisioning-runs.show');
+        Route::post('provisioning-runs/{provisioning_run}/execute', [ProvisioningRunController::class, 'execute'])
+            ->name('provisioning-runs.execute');
 
         Route::resource('modules', ModuleController::class);
         Route::resource('installation-modules', InstallationModuleController::class);
