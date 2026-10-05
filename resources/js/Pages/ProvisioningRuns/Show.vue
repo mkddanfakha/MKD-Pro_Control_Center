@@ -37,6 +37,10 @@ const props = defineProps({
             store_url: null,
         }),
     },
+    provisioning_readiness: {
+        type: Object,
+        default: null,
+    },
 });
 
 const executingProvisioning = ref(false);
@@ -129,6 +133,30 @@ function confirmExecuteProvisioning() {
             >
                 {{ execute_actions.unavailable_reason }}
             </p>
+
+            <section
+                v-if="provisioning_readiness"
+                class="mt-4 rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-200 sm:p-6"
+            >
+                <h2 class="text-base font-semibold text-gray-900">
+                    Préparation provisioning
+                </h2>
+                <p class="mt-2 text-sm text-gray-700">
+                    <span class="font-medium">{{ provisioning_readiness.label }}</span>
+                    <span class="text-gray-500"> — {{ provisioning_readiness.summary }}</span>
+                </p>
+                <ul
+                    v-if="provisioning_readiness.blockers?.length"
+                    class="mt-3 space-y-1 text-sm text-gray-700"
+                >
+                    <li
+                        v-for="blocker in provisioning_readiness.blockers.slice(0, 6)"
+                        :key="`${blocker.code}-${blocker.status}`"
+                    >
+                        {{ blocker.message }}
+                    </li>
+                </ul>
+            </section>
 
             <div
                 v-if="showExecuteConfirm"

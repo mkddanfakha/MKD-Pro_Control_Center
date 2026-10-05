@@ -56,6 +56,10 @@ const props = defineProps({
             store_url: null,
         }),
     },
+    provisioning_readiness: {
+        type: Object,
+        default: null,
+    },
 });
 
 const page = usePage();
@@ -508,6 +512,27 @@ function readinessStateClass(state) {
                 >
                     {{ provisioning_actions.unavailable_reason }}
                 </p>
+
+                <div
+                    v-if="provisioning_readiness"
+                    class="mt-4 rounded-lg bg-gray-50 px-4 py-3 text-sm text-gray-800 ring-1 ring-gray-200"
+                >
+                    <p>
+                        <span class="font-medium">{{ provisioning_readiness.label }}</span>
+                        <span class="text-gray-600"> — {{ provisioning_readiness.summary }}</span>
+                    </p>
+                    <ul
+                        v-if="provisioning_readiness.blockers?.length"
+                        class="mt-2 list-disc space-y-1 pl-5 text-gray-700"
+                    >
+                        <li
+                            v-for="blocker in provisioning_readiness.blockers.slice(0, 5)"
+                            :key="`${blocker.code}-${blocker.status}`"
+                        >
+                            {{ blocker.message }}
+                        </li>
+                    </ul>
+                </div>
 
                 <div
                     v-if="!last_provisioning_run"

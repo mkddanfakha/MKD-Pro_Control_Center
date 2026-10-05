@@ -13,11 +13,20 @@ use App\Services\Provisioning\ProductionProvisioningStepCatalog;
 use App\Services\Provisioning\ProvisioningStepRegistry;
 use App\Services\Provisioning\Steps\ValidateProvisioningStep;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Mockery;
+use Tests\Concerns\MocksProvisioningExecutionReadiness;
 use Tests\TestCase;
 
 class ProvisioningStepContractTest extends TestCase
 {
+    use MocksProvisioningExecutionReadiness;
     use RefreshDatabase;
+
+    protected function tearDown(): void
+    {
+        Mockery::close();
+        parent::tearDown();
+    }
 
     public function test_production_step_implements_contract_with_canonical_key_and_order(): void
     {
@@ -58,6 +67,8 @@ class ProvisioningStepContractTest extends TestCase
 
     public function test_production_step_execute_is_deterministic_without_external_calls(): void
     {
+        $this->mockProvisioningExecutionReadinessReady();
+
         $context = $this->makeContext();
 
         foreach (ProductionProvisioningStepCatalog::productionSteps() as $step) {

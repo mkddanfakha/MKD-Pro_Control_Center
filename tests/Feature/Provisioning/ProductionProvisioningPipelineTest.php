@@ -7,12 +7,21 @@ use App\Models\ProvisioningRun;
 use App\Models\ProvisioningRunStep;
 use App\Services\Provisioning\ProvisioningPipeline;
 use App\Services\Provisioning\ProvisioningStepRegistry;
+use Mockery;
+use Tests\Concerns\MocksProvisioningExecutionReadiness;
 use Tests\Concerns\UsesProvisioningTestDatabase;
 use Tests\TestCase;
 
 class ProductionProvisioningPipelineTest extends TestCase
 {
+    use MocksProvisioningExecutionReadiness;
     use UsesProvisioningTestDatabase;
+
+    protected function tearDown(): void
+    {
+        Mockery::close();
+        parent::tearDown();
+    }
 
     private string $connection;
 
@@ -26,6 +35,8 @@ class ProductionProvisioningPipelineTest extends TestCase
 
     public function test_pure_pipeline_stops_on_first_non_implemented_infrastructure_step(): void
     {
+        $this->mockProvisioningExecutionReadinessReady();
+
         $registry = app(ProvisioningStepRegistry::class);
         $pipeline = new ProvisioningPipeline($registry);
 
@@ -43,6 +54,8 @@ class ProductionProvisioningPipelineTest extends TestCase
 
     public function test_run_persisted_with_production_steps_does_not_fake_installation_success(): void
     {
+        $this->mockProvisioningExecutionReadinessReady();
+
         $pipeline = app(ProvisioningPipeline::class);
         $run = $this->createPendingRunWithValidInstallation();
 

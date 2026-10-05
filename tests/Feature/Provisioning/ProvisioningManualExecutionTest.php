@@ -20,12 +20,14 @@ use Inertia\Testing\AssertableInertia as Assert;
 use Mockery;
 use RuntimeException;
 use Tests\Concerns\BindsLocalProvisioningInfrastructure;
+use Tests\Concerns\MocksProvisioningExecutionReadiness;
 use Tests\Fakes\Provisioning\FakeThrowingStep;
 use Tests\TestCase;
 
 class ProvisioningManualExecutionTest extends TestCase
 {
     use BindsLocalProvisioningInfrastructure;
+    use MocksProvisioningExecutionReadiness;
     use RefreshDatabase;
 
     protected function tearDown(): void
@@ -34,17 +36,18 @@ class ProvisioningManualExecutionTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_authorized_admin_can_post_execute_on_pending_run(): void
+    public function test_authorized_admin_execute_blocked_when_installation_not_ready(): void
     {
         $user = $this->controlCenterAdminUser();
         $run = $this->createPendingRunViaFactory($user);
 
         $this->actingAs($user)
             ->post(route('provisioning-runs.execute', $run))
-            ->assertRedirect(route('provisioning-runs.show', $run));
+            ->assertRedirect(route('provisioning-runs.show', $run))
+            ->assertSessionHas('error');
 
         $run->refresh();
-        $this->assertSame(ProvisioningRun::STATUS_MANUAL_INTERVENTION_REQUIRED, $run->status);
+        $this->assertSame(ProvisioningRun::STATUS_PENDING, $run->status);
     }
 
     public function test_user_without_gate_receives_forbidden_on_execute(): void
@@ -150,6 +153,8 @@ class ProvisioningManualExecutionTest extends TestCase
 
     public function test_controller_delegates_to_pipeline_run_persisted(): void
     {
+        $this->mockProvisioningExecutionReadinessReady();
+
         $user = $this->controlCenterAdminUser();
         $run = $this->createPendingRunViaFactory($user);
 
@@ -175,6 +180,8 @@ class ProvisioningManualExecutionTest extends TestCase
 
     public function test_production_bindings_stop_at_reserve_with_manual_intervention_flash(): void
     {
+        $this->mockProvisioningExecutionReadinessReady();
+
         $user = $this->controlCenterAdminUser();
         $run = $this->createPendingRunViaFactory($user);
 
@@ -194,6 +201,8 @@ class ProvisioningManualExecutionTest extends TestCase
 
     public function test_second_post_on_same_run_after_execution_is_refused(): void
     {
+        $this->mockProvisioningExecutionReadinessReady();
+
         $user = $this->controlCenterAdminUser();
         $run = $this->createPendingRunViaFactory($user);
 
@@ -208,6 +217,8 @@ class ProvisioningManualExecutionTest extends TestCase
 
     public function test_step_exception_is_handled_with_safe_flash(): void
     {
+        $this->mockProvisioningExecutionReadinessReady();
+
         $user = $this->controlCenterAdminUser();
         $run = $this->createPendingRunViaFactory($user);
 
@@ -231,7 +242,7 @@ class ProvisioningManualExecutionTest extends TestCase
         $this->assertSame(ProvisioningRun::STATUS_FAILED, $run->fresh()->status);
     }
 
-    public function test_show_pending_exposes_can_execute_true(): void
+    public function test_show_pending_exposes_can_execute_false_when_not_ready(): void
     {
         $user = $this->controlCenterAdminUser();
         $run = $this->createPendingRunViaFactory($user);
@@ -239,8 +250,9 @@ class ProvisioningManualExecutionTest extends TestCase
         $this->actingAs($user)
             ->get(route('provisioning-runs.show', $run))
             ->assertInertia(fn (Assert $page) => $page
-                ->where('execute_actions.can_execute', true)
-                ->where('execute_actions.store_url', route('provisioning-runs.execute', $run)));
+                ->where('execute_actions.can_execute', false)
+                ->where('execute_actions.store_url', route('provisioning-runs.execute', $run))
+                ->has('provisioning_readiness.state'));
     }
 
     public function test_show_running_exposes_can_execute_false(): void

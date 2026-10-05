@@ -36,7 +36,7 @@ final class ProductionProvisioningStepCatalog
         $app ??= app();
 
         return [
-            new ValidateProvisioningStep,
+            $app->make(ValidateProvisioningStep::class),
             $app->make(ReserveProvisioningStep::class),
             $app->make(DnsProvisioningStep::class),
             $app->make(HostingProvisioningStep::class),

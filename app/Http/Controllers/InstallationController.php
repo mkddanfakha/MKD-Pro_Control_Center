@@ -14,6 +14,8 @@ use App\Models\SubscriptionReminder;
 use App\Support\AdminActionAvailability;
 use App\Services\Provisioning\ProvisioningExecutionAuditService;
 use App\Services\Provisioning\ProvisioningRunFactory;
+use App\Services\Provisioning\Readiness\InstallationReadinessEvaluationService;
+use App\Support\Provisioning\ProvisioningInstallationReadinessPresentation;
 use App\Services\AuditLogService;
 use App\Services\InstallationAccessService;
 use App\Services\SubscriptionService;
@@ -266,6 +268,13 @@ class InstallationController extends Controller
         $provisioningAvailability = $this->provisioningRunFactory
             ->describeCreateRequestAvailability($installation);
 
+        $provisioningReadiness = app(InstallationReadinessEvaluationService::class)->evaluateInstallation(
+            $installation,
+            $lastProvisioningRun,
+            preflightReport: null,
+            runPreflightWhenMissing: false,
+        );
+
         return Inertia::render('Installations/Show', [
             'installation' => $this->serializeInstallationForAdminDetail($installation),
             'current_subscription' => $this->serializeCurrentSubscriptionForShow($currentSubscription),
@@ -303,6 +312,7 @@ class InstallationController extends Controller
                 'retry_basis_run_id' => $provisioningAvailability['retry_basis_run_id'],
                 'store_url' => route('installations.provisioning-runs.store', $installation),
             ],
+            'provisioning_readiness' => ProvisioningInstallationReadinessPresentation::present($provisioningReadiness),
         ]);
     }
 

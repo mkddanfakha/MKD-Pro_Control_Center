@@ -50,6 +50,16 @@ final class InstallationReadinessProofCatalog
 
     public const CODE_INSTALLATION_VERSION_RECORDED = 'installation_version_recorded';
 
+    public const CODE_INSTALLATION_CLIENT_PRESENT = 'installation_client_present';
+
+    public const CODE_INSTALLATION_DATABASE_CONFIGURATION_PRESENT = 'installation_database_configuration_present';
+
+    public const CODE_INSTALLATION_STATUS_ELIGIBLE = 'installation_status_eligible';
+
+    public const CODE_PROVISIONING_CAPACITY_RESERVATION_AVAILABLE = 'provisioning_capacity_reservation_available';
+
+    public const DOMAIN_PROVISIONING_EXECUTION = 'provisioning_execution';
+
     public const CODE_PROVISIONING_RUN_PRESENT = 'provisioning_run_present';
 
     public const CODE_PROVISIONING_RUN_SUCCEEDED = 'provisioning_run_succeeded';
@@ -99,6 +109,11 @@ final class InstallationReadinessProofCatalog
             self::CODE_SUBDOMAIN_CONFIGURATION_PRESENT => self::def(self::DOMAIN_INSTALLATION, InstallationReadinessProofLevel::REQUIRED, true, true),
             self::CODE_DOMAIN_CONFIGURATION_PRESENT => self::def(self::DOMAIN_INSTALLATION, InstallationReadinessProofLevel::REQUIRED, true, true),
             self::CODE_INSTALLATION_VERSION_RECORDED => self::def(self::DOMAIN_INSTALLATION, InstallationReadinessProofLevel::RECOMMENDED, true, false),
+            self::CODE_INSTALLATION_CLIENT_PRESENT => self::def(self::DOMAIN_INSTALLATION, InstallationReadinessProofLevel::REQUIRED, true, true),
+            self::CODE_INSTALLATION_DATABASE_CONFIGURATION_PRESENT => self::def(self::DOMAIN_INSTALLATION, InstallationReadinessProofLevel::REQUIRED, true, true),
+            self::CODE_INSTALLATION_STATUS_ELIGIBLE => self::def(self::DOMAIN_INSTALLATION, InstallationReadinessProofLevel::REQUIRED, true, true),
+
+            self::CODE_PROVISIONING_CAPACITY_RESERVATION_AVAILABLE => self::def(self::DOMAIN_PROVISIONING_EXECUTION, InstallationReadinessProofLevel::REQUIRED, true, true),
 
             self::CODE_PROVISIONING_RUN_PRESENT => self::def(self::DOMAIN_PROVISIONING_RUN, InstallationReadinessProofLevel::RECOMMENDED, true, false),
             self::CODE_PROVISIONING_RUN_SUCCEEDED => self::def(self::DOMAIN_PROVISIONING_RUN, InstallationReadinessProofLevel::RECOMMENDED, true, false),
@@ -164,6 +179,30 @@ final class InstallationReadinessProofCatalog
         }
 
         return $codes;
+    }
+
+    /**
+     * Preuves obligatoires avant toute exécution pipeline (TASK 3W) — distinct du READY client Gestion.
+     *
+     * @return list<string>
+     */
+    public static function requiredProofCodesForProvisioningExecution(): array
+    {
+        return [
+            self::CODE_INSTALLATION_RECORD_PRESENT,
+            self::CODE_INSTALLATION_NOT_TERMINATED,
+            self::CODE_INSTALLATION_CLIENT_PRESENT,
+            self::CODE_INSTALLATION_STATUS_ELIGIBLE,
+            self::CODE_SUBDOMAIN_CONFIGURATION_PRESENT,
+            self::CODE_DOMAIN_CONFIGURATION_PRESENT,
+            self::CODE_INSTALLATION_DATABASE_CONFIGURATION_PRESENT,
+            self::CODE_PROVISIONING_CONFIGURATION_LOADED,
+            self::CODE_INFRASTRUCTURE_CLOUDFLARE_DNS_VERIFIED,
+            self::CODE_INFRASTRUCTURE_O2SWITCH_DATABASE_VERIFIED,
+            self::CODE_INFRASTRUCTURE_O2SWITCH_GIT_VERIFIED,
+            self::CODE_INFRASTRUCTURE_O2SWITCH_FILEMAN_VERIFIED,
+            self::CODE_PROVISIONING_CAPACITY_RESERVATION_AVAILABLE,
+        ];
     }
 
     /**

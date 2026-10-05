@@ -44,12 +44,21 @@ use App\Services\Provisioning\ProvisioningPipeline;
 use App\Services\Provisioning\ProvisioningStepRegistry;
 use App\Services\Provisioning\Steps\ReserveProvisioningStep;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Mockery;
+use Tests\Concerns\MocksProvisioningExecutionReadiness;
 use Tests\Fakes\Provisioning\Infrastructure\FakeCapacityReservationAdapter;
 use Tests\TestCase;
 
 class ProvisioningInfrastructureContractTest extends TestCase
 {
+    use MocksProvisioningExecutionReadiness;
     use RefreshDatabase;
+
+    protected function tearDown(): void
+    {
+        Mockery::close();
+        parent::tearDown();
+    }
 
     /**
      * @return list<class-string>
@@ -184,6 +193,8 @@ class ProvisioningInfrastructureContractTest extends TestCase
 
     public function test_production_pipeline_stops_on_reserve_with_unavailable_adapters(): void
     {
+        $this->mockProvisioningExecutionReadinessReady();
+
         $registry = app(ProvisioningStepRegistry::class);
         $pipeline = new ProvisioningPipeline($registry);
         $context = $this->makeContext();

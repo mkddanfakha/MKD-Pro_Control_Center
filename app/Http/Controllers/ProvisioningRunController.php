@@ -10,6 +10,8 @@ use App\Models\ProvisioningRun;
 use App\Services\Provisioning\ProvisioningExecutionAuditService;
 use App\Services\Provisioning\ProvisioningPipeline;
 use App\Services\Provisioning\ProvisioningStepRegistry;
+use App\Services\Provisioning\Readiness\InstallationReadinessEvaluationService;
+use App\Support\Provisioning\ProvisioningInstallationReadinessPresentation;
 use App\Support\ProvisioningRunAdminPresentation;
 use Illuminate\Http\RedirectResponse;
 use Inertia\Inertia;
@@ -33,6 +35,11 @@ class ProvisioningRunController extends Controller
         $client = $installation?->client;
 
         $registry = app(ProvisioningStepRegistry::class);
+        $readiness = app(InstallationReadinessEvaluationService::class)->evaluateProvisioningRun(
+            $provisioningRun,
+            preflightReport: null,
+            runPreflightWhenMissing: false,
+        );
 
         return Inertia::render('ProvisioningRuns/Show', [
             'provisioning_run' => ProvisioningRunAdminPresentation::run($provisioningRun),
@@ -40,9 +47,11 @@ class ProvisioningRunController extends Controller
             'steps' => $steps->map(
                 fn ($step) => ProvisioningRunAdminPresentation::step($step),
             )->values()->all(),
+            'provisioning_readiness' => ProvisioningInstallationReadinessPresentation::present($readiness),
             'execute_actions' => ProvisioningRunAdminPresentation::describeExecuteAvailability(
                 $provisioningRun,
                 $registry,
+                $readiness,
             ),
             'navigation' => [
                 'installation_show' => $installation !== null
@@ -68,9 +77,16 @@ class ProvisioningRunController extends Controller
     ): RedirectResponse {
         $provisioningRun->loadMissing(['installation.client', 'steps']);
 
+        $readiness = app(InstallationReadinessEvaluationService::class)->evaluateProvisioningRun(
+            $provisioningRun,
+            preflightReport: null,
+            runPreflightWhenMissing: false,
+        );
+
         $executeAvailability = ProvisioningRunAdminPresentation::describeExecuteAvailability(
             $provisioningRun,
             $registry,
+            $readiness,
         );
 
         if (! $executeAvailability['can_execute']) {

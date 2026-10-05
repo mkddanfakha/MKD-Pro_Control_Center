@@ -8,7 +8,9 @@ use App\Models\Client;
 use App\Models\Installation;
 use App\Models\ProvisioningRun;
 use App\Models\ProvisioningRunStep;
+use App\DTO\Provisioning\InstallationReadinessAssessmentResult;
 use App\Services\Provisioning\ProvisioningStepRegistry;
+use App\Services\Provisioning\Readiness\InstallationReadinessEvaluationService;
 use DateTimeInterface;
 use Illuminate\Support\Collection;
 use InvalidArgumentException;
@@ -92,6 +94,7 @@ final class ProvisioningRunAdminPresentation
     public static function describeExecuteAvailability(
         ProvisioningRun $run,
         ProvisioningStepRegistry $registry,
+        ?InstallationReadinessAssessmentResult $readinessAssessment = null,
     ): array {
         $storeUrl = route('provisioning-runs.execute', $run);
 
@@ -146,6 +149,22 @@ final class ProvisioningRunAdminPresentation
             ProvisioningContext::fromRun($run);
         } catch (InvalidArgumentException $exception) {
             return [...$base, 'unavailable_reason' => $exception->getMessage()];
+        }
+
+        $readinessAssessment ??= app(InstallationReadinessEvaluationService::class)->evaluateProvisioningRun(
+            $run,
+            preflightReport: null,
+            runPreflightWhenMissing: false,
+        );
+
+        if (! $readinessAssessment->isReady()) {
+            $evaluation = app(InstallationReadinessEvaluationService::class);
+
+            return [
+                ...$base,
+                'unavailable_reason' => $evaluation->executionBlockReason($readinessAssessment)
+                    ?? 'Installation non prête pour le provisioning.',
+            ];
         }
 
         return [

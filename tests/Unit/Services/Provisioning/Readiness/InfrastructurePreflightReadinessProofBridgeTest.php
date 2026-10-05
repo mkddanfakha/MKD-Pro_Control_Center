@@ -88,9 +88,12 @@ class InfrastructurePreflightReadinessProofBridgeTest extends TestCase
             installationId: 1,
             installationStatus: 'active',
             installationTerminated: false,
+            clientRecordPresent: true,
             subdomain: 'demo',
             domain: 'demo.example.test',
             installationVersion: '1.0.0',
+            databaseName: 'mkd_demo',
+            databaseHost: 'mysql.test',
             provisioningRunId: null,
             provisioningRunStatus: null,
             targetVersion: null,
@@ -104,7 +107,7 @@ class InfrastructurePreflightReadinessProofBridgeTest extends TestCase
             InstallationReadinessProofCatalog::requiredProofCodesForClientReady(),
         );
 
-        $this->assertSame(InstallationReadinessDecisionOutcome::NOT_READY, $assessment->outcome);
+        $this->assertSame(InstallationReadinessDecisionOutcome::MANUAL_INTERVENTION_REQUIRED, $assessment->outcome);
     }
 
     public function test_nominal_fictional_all_ready_produces_verified_infrastructure_proofs(): void
@@ -177,9 +180,12 @@ class InfrastructurePreflightReadinessProofBridgeTest extends TestCase
             installationId: 1,
             installationStatus: 'active',
             installationTerminated: false,
+            clientRecordPresent: true,
             subdomain: 'demo',
             domain: 'demo.example.test',
             installationVersion: null,
+            databaseName: 'mkd_demo',
+            databaseHost: 'mysql.test',
             provisioningRunId: null,
             provisioningRunStatus: null,
             targetVersion: null,
@@ -212,9 +218,12 @@ class InfrastructurePreflightReadinessProofBridgeTest extends TestCase
             installationId: 10,
             installationStatus: 'active',
             installationTerminated: false,
+            clientRecordPresent: true,
             subdomain: 'client',
             domain: 'client.example.test',
             installationVersion: '2.0.0',
+            databaseName: 'mkd_client',
+            databaseHost: 'mysql.test',
             provisioningRunId: 5,
             provisioningRunStatus: 'succeeded',
             targetVersion: '2.0.0',
@@ -228,7 +237,7 @@ class InfrastructurePreflightReadinessProofBridgeTest extends TestCase
             InstallationReadinessProofCatalog::requiredProofCodesForClientReady(),
         );
 
-        $this->assertSame(InstallationReadinessDecisionOutcome::NOT_READY, $assessment->outcome);
+        $this->assertSame(InstallationReadinessDecisionOutcome::MANUAL_INTERVENTION_REQUIRED, $assessment->outcome);
     }
 
     public function test_authentication_failed_with_backup_pending_reflects_failed_priority(): void
@@ -240,9 +249,12 @@ class InfrastructurePreflightReadinessProofBridgeTest extends TestCase
             installationId: 1,
             installationStatus: 'active',
             installationTerminated: false,
+            clientRecordPresent: true,
             subdomain: 'x',
             domain: 'x.example.test',
             installationVersion: null,
+            databaseName: 'mkd_x',
+            databaseHost: 'mysql.test',
             provisioningRunId: null,
             provisioningRunStatus: null,
             targetVersion: null,

@@ -66,6 +66,8 @@ use App\Services\Provisioning\Infrastructure\Preflight\O2SwitchSshPreflightCheck
 use App\Services\Provisioning\ProductionProvisioningStepCatalog;
 use App\Services\Provisioning\ProvisioningInfrastructurePreflight;
 use App\Services\Provisioning\ProvisioningStepRegistry;
+use App\Services\Provisioning\Readiness\InstallationReadinessEvaluationService;
+use App\Services\Provisioning\Readiness\Verifiers\CapacityReservationReadinessVerifier;
 use Illuminate\Support\ServiceProvider;
 
 class ProvisioningServiceProvider extends ServiceProvider
@@ -74,6 +76,7 @@ class ProvisioningServiceProvider extends ServiceProvider
     {
         $this->registerInfrastructureAdapterBindings();
         $this->registerInfrastructurePreflight();
+        $this->registerReadinessServices();
 
         $this->app->singleton(ProvisioningStepRegistry::class, function (): ProvisioningStepRegistry {
             $registry = new ProvisioningStepRegistry;
@@ -94,6 +97,12 @@ class ProvisioningServiceProvider extends ServiceProvider
                 new O2SwitchSshPreflightCheck,
             ]);
         });
+    }
+
+    private function registerReadinessServices(): void
+    {
+        $this->app->singleton(CapacityReservationReadinessVerifier::class);
+        $this->app->singleton(InstallationReadinessEvaluationService::class);
     }
 
     private function registerInfrastructureAdapterBindings(): void
