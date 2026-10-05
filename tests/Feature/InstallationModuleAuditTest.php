@@ -18,7 +18,7 @@ class InstallationModuleAuditTest extends TestCase
 
     public function test_installation_module_creation_is_audited(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
         $module = $this->makeModule();
 
@@ -58,7 +58,7 @@ class InstallationModuleAuditTest extends TestCase
 
     public function test_installation_module_update_is_audited_with_formatted_dates(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
         $module = $this->makeModule();
 
@@ -101,7 +101,7 @@ class InstallationModuleAuditTest extends TestCase
 
     public function test_installation_module_deletion_is_audited_without_polymorphic_reference(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
         $module = $this->makeModule();
 
@@ -133,7 +133,7 @@ class InstallationModuleAuditTest extends TestCase
 
     public function test_deleting_last_installation_module_allows_installation_deletion(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $client = $this->makeClient();
 
         $installation = Installation::query()->create([
@@ -179,7 +179,7 @@ class InstallationModuleAuditTest extends TestCase
 
     public function test_deleting_last_installation_module_allows_module_deletion(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
         $module = $this->makeModule();
 
@@ -216,7 +216,7 @@ class InstallationModuleAuditTest extends TestCase
 
     public function test_deleting_one_installation_module_keeps_other_module_assignments(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installationA = $this->makeInstallation();
         $installationB = $this->makeInstallation();
         $module = $this->makeModule();
@@ -254,7 +254,7 @@ class InstallationModuleAuditTest extends TestCase
 
     public function test_deleting_one_installation_module_keeps_other_installation_assignments(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
         $moduleM1 = $this->makeModule();
         $moduleM2 = Module::query()->create([
@@ -298,7 +298,7 @@ class InstallationModuleAuditTest extends TestCase
 
     public function test_deleting_inactive_installation_module_keeps_parents_unchanged(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
         $module = $this->makeModule();
 
@@ -337,7 +337,7 @@ class InstallationModuleAuditTest extends TestCase
 
     public function test_consultation_routes_do_not_create_audit_logs(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
         $module = $this->makeModule();
 
@@ -357,7 +357,7 @@ class InstallationModuleAuditTest extends TestCase
 
     public function test_duplicate_installation_module_pair_records_only_one_creation_audit(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
         $module = $this->makeModule();
 
@@ -380,7 +380,7 @@ class InstallationModuleAuditTest extends TestCase
 
     public function test_failed_validation_does_not_create_installation_module_audit(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
         $module = $this->makeModule();
 
@@ -462,14 +462,13 @@ class InstallationModuleAuditTest extends TestCase
     {
         $moduleDeletedAuditCount = AuditLog::query()->where('action', 'module.deleted')->count();
 
-        $this->withoutExceptionHandling();
-
-        try {
-            $this->actingAs($user)->delete(route('modules.destroy', $module));
-            $this->fail('Expected module deletion to be blocked by installation_modules foreign key (QueryException).');
-        } catch (QueryException $exception) {
-            $this->assertNotSame('', trim($exception->getMessage()));
-        }
+        $this->actingAs($user)
+            ->delete(route('modules.destroy', $module))
+            ->assertRedirect(route('modules.show', $module))
+            ->assertSessionHas(
+                'error',
+                'Ce module ne peut pas être supprimé car il est encore affecté à une ou plusieurs installations.',
+            );
 
         $this->assertSame(
             $moduleDeletedAuditCount,
@@ -481,14 +480,13 @@ class InstallationModuleAuditTest extends TestCase
     {
         $installationDeletedAuditCount = AuditLog::query()->where('action', 'installation.deleted')->count();
 
-        $this->withoutExceptionHandling();
-
-        try {
-            $this->actingAs($user)->delete(route('installations.destroy', $installation));
-            $this->fail('Expected installation deletion to be blocked by installation_modules foreign key (QueryException).');
-        } catch (QueryException $exception) {
-            $this->assertNotSame('', trim($exception->getMessage()));
-        }
+        $this->actingAs($user)
+            ->delete(route('installations.destroy', $installation))
+            ->assertRedirect(route('installations.show', $installation))
+            ->assertSessionHas(
+                'error',
+                'Cette installation ne peut pas être supprimée car des modules lui sont encore associés.',
+            );
 
         $this->assertSame(
             $installationDeletedAuditCount,

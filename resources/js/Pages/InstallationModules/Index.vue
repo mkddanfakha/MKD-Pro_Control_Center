@@ -1,7 +1,15 @@
 <script setup>
 import AdminLayout from '@/Layouts/AdminLayout.vue';
+import {
+    ADMIN_EMPTY_STATE_MESSAGES,
+    formatAdminDateTimeUtc,
+    installationModuleStatusBadgeClass,
+    installationModuleStatusLabel,
+} from '@/lib/adminPresentation.js';
 import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import { ref } from 'vue';
+
+const emptyStateMessage = ADMIN_EMPTY_STATE_MESSAGES.installationModules;
 
 defineProps({
     installationModules: {
@@ -14,50 +22,6 @@ const page = usePage();
 
 const deletingId = ref(null);
 const assignmentPendingDelete = ref(null);
-
-function formatDate(value) {
-    if (!value || String(value).trim() === '') {
-        return '—';
-    }
-
-    const date = new Date(value);
-
-    if (Number.isNaN(date.getTime())) {
-        return '—';
-    }
-
-    const datePart = new Intl.DateTimeFormat('fr-FR', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-    }).format(date);
-
-    const timePart = new Intl.DateTimeFormat('fr-FR', {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false,
-    }).format(date);
-
-    return `${datePart} ${timePart}`;
-}
-
-function statusLabel(status) {
-    const labels = {
-        active: 'Actif',
-        inactive: 'Inactif',
-    };
-
-    return labels[status] ?? status;
-}
-
-function statusBadgeClass(status) {
-    const classes = {
-        active: 'bg-sky-50 text-sky-800 ring-sky-200',
-        inactive: 'bg-gray-100 text-gray-600 ring-gray-200',
-    };
-
-    return classes[status] ?? 'bg-gray-100 text-gray-600 ring-gray-200';
-}
 
 function displayValue(value) {
     return value && String(value).trim() !== '' ? value : '—';
@@ -123,22 +87,6 @@ function confirmDelete() {
 
     <AdminLayout>
         <div>
-            <div
-                v-if="page.flash.success"
-                class="mb-6 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm font-medium text-green-800"
-                role="status"
-            >
-                {{ page.flash.success }}
-            </div>
-
-            <div
-                v-if="page.flash.error"
-                class="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-800"
-                role="alert"
-            >
-                {{ page.flash.error }}
-            </div>
-
             <div
                 v-if="assignmentPendingDelete"
                 class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
@@ -219,7 +167,7 @@ function confirmDelete() {
                 class="mt-8 rounded-xl border border-dashed border-gray-300 bg-white px-6 py-16 text-center shadow-sm"
             >
                 <h2 class="text-lg font-semibold text-gray-900">
-                    Aucune affectation de module pour le moment.
+                    {{ emptyStateMessage }}
                 </h2>
 
                 <Link
@@ -326,13 +274,13 @@ function confirmDelete() {
                                     <td class="whitespace-nowrap px-4 py-4 sm:px-6">
                                         <span
                                             class="inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset"
-                                            :class="statusBadgeClass(assignment.status)"
+                                            :class="installationModuleStatusBadgeClass(assignment.status)"
                                         >
-                                            {{ statusLabel(assignment.status) }}
+                                            {{ installationModuleStatusLabel(assignment.status) }}
                                         </span>
                                     </td>
                                     <td class="hidden whitespace-nowrap px-4 py-4 text-gray-600 lg:table-cell sm:px-6">
-                                        {{ formatDate(assignment.activated_at) }}
+                                        {{ formatAdminDateTimeUtc(assignment.activated_at) }}
                                     </td>
                                     <td class="px-4 py-4 sm:px-6">
                                         <div class="flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -349,6 +297,7 @@ function confirmDelete() {
                                                 Modifier
                                             </Link>
                                             <button
+                                                v-if="assignment.can_delete !== false"
                                                 type="button"
                                                 class="text-sm font-medium text-red-700 underline-offset-2 hover:text-red-900 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-red-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
                                                 :disabled="deletingId === assignment.id"

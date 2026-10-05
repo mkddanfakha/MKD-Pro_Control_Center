@@ -1,9 +1,19 @@
 <script setup>
 import AdminLayout from '@/Layouts/AdminLayout.vue';
+import {
+    formatAdminAmount,
+    formatAdminDateTimeUtc,
+    moduleCatalogStatusBadgeClass,
+    moduleCatalogStatusLabel,
+} from '@/lib/adminPresentation.js';
 import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import { ref } from 'vue';
 
 const props = defineProps({
+    admin_urls: {
+        type: Object,
+        default: () => ({}),
+    },
     module: {
         type: Object,
         required: true,
@@ -17,62 +27,6 @@ const deleting = ref(false);
 
 function displayValue(value) {
     return value && String(value).trim() !== '' ? value : '—';
-}
-
-function formatDateTime(value) {
-    if (!value || String(value).trim() === '') {
-        return '—';
-    }
-
-    const date = new Date(value);
-
-    if (Number.isNaN(date.getTime())) {
-        return '—';
-    }
-
-    const datePart = new Intl.DateTimeFormat('fr-FR', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-    }).format(date);
-
-    const timePart = new Intl.DateTimeFormat('fr-FR', {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false,
-    }).format(date);
-
-    return `${datePart} ${timePart}`;
-}
-
-function formatAmount(amount, currency) {
-    if (amount === null || amount === undefined || amount === '') {
-        return '—';
-    }
-
-    const formatted = new Intl.NumberFormat('fr-FR', {
-        maximumFractionDigits: 0,
-    }).format(Number(amount));
-
-    return `${formatted} ${currency ?? 'XOF'}`;
-}
-
-function statusLabel(status) {
-    const labels = {
-        active: 'Actif',
-        inactive: 'Inactif',
-    };
-
-    return labels[status] ?? status;
-}
-
-function statusBadgeClass(status) {
-    const classes = {
-        active: 'bg-sky-50 text-sky-800 ring-sky-200',
-        inactive: 'bg-gray-100 text-gray-600 ring-gray-200',
-    };
-
-    return classes[status] ?? 'bg-gray-100 text-gray-600 ring-gray-200';
 }
 
 function openDeleteConfirm() {
@@ -109,14 +63,6 @@ function confirmDelete() {
 
     <AdminLayout>
         <div>
-            <div
-                v-if="page.flash.success"
-                class="mb-6 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm font-medium text-green-800"
-                role="status"
-            >
-                {{ page.flash.success }}
-            </div>
-
             <div
                 v-if="showDeleteConfirm"
                 class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
@@ -171,7 +117,7 @@ function confirmDelete() {
                     </h1>
 
                     <p class="mt-1 text-sm text-gray-500">
-                        Détail du module
+                        Module catalogue #{{ module.id }}
                     </p>
                 </div>
 
@@ -180,7 +126,14 @@ function confirmDelete() {
                         href="/modules"
                         class="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2"
                     >
-                        Retour
+                        ← Retour aux modules
+                    </Link>
+
+                    <Link
+                        href="/installation-modules"
+                        class="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2"
+                    >
+                        Affectations des modules
                     </Link>
 
                     <Link
@@ -191,6 +144,7 @@ function confirmDelete() {
                     </Link>
 
                     <button
+                        v-if="admin_urls.can_delete !== false"
                         type="button"
                         class="inline-flex items-center justify-center rounded-lg border border-red-200 bg-white px-4 py-2.5 text-sm font-medium text-red-700 shadow-sm transition hover:bg-red-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
                         :disabled="deleting"
@@ -198,6 +152,12 @@ function confirmDelete() {
                     >
                         Supprimer
                     </button>
+                    <p
+                        v-else-if="admin_urls.delete_unavailable_reason"
+                        class="text-sm text-gray-600"
+                    >
+                        {{ admin_urls.delete_unavailable_reason }}
+                    </p>
                 </div>
             </div>
 
@@ -251,9 +211,9 @@ function confirmDelete() {
                             <dd class="mt-1">
                                 <span
                                     class="inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset"
-                                    :class="statusBadgeClass(module.status)"
+                                    :class="moduleCatalogStatusBadgeClass(module.status)"
                                 >
-                                    {{ statusLabel(module.status) }}
+                                    {{ moduleCatalogStatusLabel(module.status) }}
                                 </span>
                             </dd>
                         </div>
@@ -280,7 +240,7 @@ function confirmDelete() {
                                 Prix
                             </dt>
                             <dd class="mt-1 text-sm font-medium text-gray-900">
-                                {{ formatAmount(module.price, module.currency) }}
+                                {{ module.price != null ? formatAdminAmount(module.price, module.currency) : '—' }}
                             </dd>
                         </div>
 
@@ -315,7 +275,7 @@ function confirmDelete() {
                                 Créé le
                             </dt>
                             <dd class="mt-1 text-sm text-gray-900">
-                                {{ formatDateTime(module.created_at) }}
+                                {{ formatAdminDateTimeUtc(module.created_at) }}
                             </dd>
                         </div>
 
@@ -324,7 +284,7 @@ function confirmDelete() {
                                 Modifié le
                             </dt>
                             <dd class="mt-1 text-sm text-gray-900">
-                                {{ formatDateTime(module.updated_at) }}
+                                {{ formatAdminDateTimeUtc(module.updated_at) }}
                             </dd>
                         </div>
                     </dl>

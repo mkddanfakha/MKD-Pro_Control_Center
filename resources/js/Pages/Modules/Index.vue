@@ -1,7 +1,15 @@
 <script setup>
 import AdminLayout from '@/Layouts/AdminLayout.vue';
+import {
+    ADMIN_EMPTY_STATE_MESSAGES,
+    formatAdminAmount,
+    moduleCatalogStatusBadgeClass,
+    moduleCatalogStatusLabel,
+} from '@/lib/adminPresentation.js';
 import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import { ref } from 'vue';
+
+const emptyStateMessage = ADMIN_EMPTY_STATE_MESSAGES.modules;
 
 defineProps({
     modules: {
@@ -14,36 +22,6 @@ const page = usePage();
 
 const deletingId = ref(null);
 const modulePendingDelete = ref(null);
-
-function formatAmount(amount, currency) {
-    if (amount === null || amount === undefined || amount === '') {
-        return '—';
-    }
-
-    const formatted = new Intl.NumberFormat('fr-FR', {
-        maximumFractionDigits: 0,
-    }).format(Number(amount));
-
-    return `${formatted} ${currency ?? 'XOF'}`;
-}
-
-function statusLabel(status) {
-    const labels = {
-        active: 'Actif',
-        inactive: 'Inactif',
-    };
-
-    return labels[status] ?? status;
-}
-
-function statusBadgeClass(status) {
-    const classes = {
-        active: 'bg-sky-50 text-sky-800 ring-sky-200',
-        inactive: 'bg-gray-100 text-gray-600 ring-gray-200',
-    };
-
-    return classes[status] ?? 'bg-gray-100 text-gray-600 ring-gray-200';
-}
 
 function displayValue(value) {
     return value && String(value).trim() !== '' ? value : '—';
@@ -109,14 +87,6 @@ function confirmDelete() {
 
     <AdminLayout>
         <div>
-            <div
-                v-if="page.flash.success"
-                class="mb-6 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm font-medium text-green-800"
-                role="status"
-            >
-                {{ page.flash.success }}
-            </div>
-
             <div
                 v-if="modulePendingDelete"
                 class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
@@ -188,7 +158,7 @@ function confirmDelete() {
                 class="mt-8 rounded-xl border border-dashed border-gray-300 bg-white px-6 py-16 text-center shadow-sm"
             >
                 <h2 class="text-lg font-semibold text-gray-900">
-                    Aucun module enregistré.
+                    {{ emptyStateMessage }}
                 </h2>
 
                 <p class="mx-auto mt-2 max-w-md text-sm text-gray-500">
@@ -279,14 +249,14 @@ function confirmDelete() {
                                         {{ displayValue(module.version) }}
                                     </td>
                                     <td class="hidden whitespace-nowrap px-4 py-4 text-gray-900 lg:table-cell sm:px-6">
-                                        {{ formatAmount(module.price, module.currency) }}
+                                        {{ module.price != null ? formatAdminAmount(module.price, module.currency) : '—' }}
                                     </td>
                                     <td class="whitespace-nowrap px-4 py-4 sm:px-6">
                                         <span
                                             class="inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset"
-                                            :class="statusBadgeClass(module.status)"
+                                            :class="moduleCatalogStatusBadgeClass(module.status)"
                                         >
-                                            {{ statusLabel(module.status) }}
+                                            {{ moduleCatalogStatusLabel(module.status) }}
                                         </span>
                                     </td>
                                     <td class="hidden whitespace-nowrap px-4 py-4 text-gray-600 md:table-cell sm:px-6">
@@ -307,6 +277,7 @@ function confirmDelete() {
                                                 Modifier
                                             </Link>
                                             <button
+                                                v-if="module.can_delete !== false"
                                                 type="button"
                                                 class="text-sm font-medium text-red-700 underline-offset-2 hover:text-red-900 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-red-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
                                                 :disabled="deletingId === module.id"

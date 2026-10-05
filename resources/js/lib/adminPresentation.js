@@ -109,4 +109,31 @@ export function paymentStatusBadgeClass(status) {
 export const ADMIN_EMPTY_STATE_MESSAGES = {
     clients: 'Aucun client ne correspond aux critères.',
     installations: 'Aucune installation ne correspond aux critères.',
+    modules: 'Aucun module enregistré.',
+    installationModules: 'Aucune affectation de module pour le moment.',
 };
+export function moduleCatalogStatusLabel(status) {
+    const labels = {
+        active: 'Actif',
+        inactive: 'Inactif',
+    };
+
+    return labels[status] ?? status;
+}
+
+export function moduleCatalogStatusBadgeClass(status) {
+    const classes = {
+        active: 'bg-sky-50 text-sky-800 ring-sky-200',
+        inactive: 'bg-gray-100 text-gray-600 ring-gray-200',
+    };
+
+    return classes[status] ?? 'bg-gray-100 text-gray-600 ring-gray-200';
+}
+
+export function installationModuleStatusLabel(status) {
+    return moduleCatalogStatusLabel(status);
+}
+
+export function installationModuleStatusBadgeClass(status) {
+    return moduleCatalogStatusBadgeClass(status);
+}

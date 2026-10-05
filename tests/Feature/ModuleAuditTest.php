@@ -8,7 +8,6 @@ use App\Models\Installation;
 use App\Models\InstallationModule;
 use App\Models\Module;
 use App\Models\User;
-use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -18,7 +17,7 @@ class ModuleAuditTest extends TestCase
 
     public function test_module_creation_is_audited(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
 
         $payload = [
             'name' => 'Module Audit',
@@ -50,7 +49,7 @@ class ModuleAuditTest extends TestCase
 
     public function test_module_update_is_audited(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
 
         $module = Module::query()->create([
             'name' => 'Nom initial',
@@ -99,7 +98,7 @@ class ModuleAuditTest extends TestCase
 
     public function test_module_deletion_is_audited_without_polymorphic_reference(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
 
         $module = Module::query()->create([
             'name' => 'Module à supprimer',
@@ -128,7 +127,7 @@ class ModuleAuditTest extends TestCase
 
     public function test_destroy_module_with_installation_module_is_blocked_by_foreign_key(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $client = $this->makeClient();
 
         $installation = Installation::query()->create([
@@ -156,7 +155,7 @@ class ModuleAuditTest extends TestCase
 
     public function test_destroy_module_with_multiple_installation_modules_is_blocked_by_foreign_key(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $client = $this->makeClient();
 
         $installationA = Installation::query()->create([
@@ -198,7 +197,7 @@ class ModuleAuditTest extends TestCase
 
     public function test_destroy_inactive_module_with_installation_module_is_blocked_by_foreign_key(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $client = $this->makeClient();
 
         $module = Module::query()->create([
@@ -234,7 +233,7 @@ class ModuleAuditTest extends TestCase
 
     public function test_consultation_routes_do_not_create_audit_logs(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
 
         $module = Module::query()->create([
             'name' => 'Consultation',
@@ -254,7 +253,7 @@ class ModuleAuditTest extends TestCase
 
     public function test_failed_validation_does_not_create_module_audit(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
 
         $this->actingAs($user)->post(route('modules.store'), [
             'name' => '',
@@ -319,14 +318,13 @@ class ModuleAuditTest extends TestCase
 
     private function assertModuleDestroyIsBlockedByForeignKey(User $user, Module $module): void
     {
-        $this->withoutExceptionHandling();
-
-        try {
-            $this->actingAs($user)->delete(route('modules.destroy', $module));
-            $this->fail('Expected module deletion to be blocked by installation_modules foreign key (QueryException).');
-        } catch (QueryException $exception) {
-            $this->assertNotSame('', trim($exception->getMessage()));
-        }
+        $this->actingAs($user)
+            ->delete(route('modules.destroy', $module))
+            ->assertRedirect(route('modules.show', $module))
+            ->assertSessionHas(
+                'error',
+                'Ce module ne peut pas être supprimé car il est encore affecté à une ou plusieurs installations.',
+            );
 
         $this->assertSame(0, AuditLog::query()->where('action', 'module.deleted')->count());
     }

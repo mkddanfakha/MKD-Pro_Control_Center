@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Module;
 use App\Services\AuditLogService;
+use App\Support\AdminActionAvailability;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -22,11 +23,25 @@ class ModuleController extends Controller
     public function index(): Response
     {
         $modules = Module::query()
+            ->withCount('installationModules')
             ->orderByDesc('id')
             ->paginate(15);
 
+        $modules->getCollection()->transform(function (Module $module): Module {
+            $availability = AdminActionAvailability::moduleFromAssignmentsCount(
+                (int) $module->installation_modules_count,
+            );
+            $module->setAttribute('can_delete', $availability['can_delete']);
+            $module->setAttribute('delete_unavailable_reason', $availability['delete_unavailable_reason']);
+
+            return $module;
+        });
+
         return Inertia::render('Modules/Index', [
             'modules' => $modules,
+            'admin_urls' => [
+                'create' => route('modules.create'),
+            ],
         ]);
     }
 
@@ -65,6 +80,10 @@ class ModuleController extends Controller
     {
         return Inertia::render('Modules/Show', [
             'module' => $module,
+            'admin_urls' => AdminActionAvailability::mergeIntoAdminUrls(
+                AdminActionAvailability::module($module),
+                ['edit' => route('modules.edit', $module)],
+            ),
         ]);
     }
 
@@ -106,6 +125,12 @@ class ModuleController extends Controller
      */
     public function destroy(Module $module): RedirectResponse
     {
+        if ($module->installationModules()->exists()) {
+            return redirect()
+                ->route('modules.show', $module)
+                ->with('error', 'Ce module ne peut pas être supprimé car il est encore affecté à une ou plusieurs installations.');
+        }
+
         $oldValues = $this->moduleAuditSnapshot($module);
 
         $module->delete();

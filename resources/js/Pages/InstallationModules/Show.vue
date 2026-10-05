@@ -4,6 +4,10 @@ import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
 
 const props = defineProps({
+    admin_urls: {
+        type: Object,
+        default: () => ({}),
+    },
     installationModule: {
         type: Object,
         required: true,
@@ -135,22 +139,6 @@ function confirmDelete() {
     <AdminLayout>
         <div>
             <div
-                v-if="page.flash.success"
-                class="mb-6 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm font-medium text-green-800"
-                role="status"
-            >
-                {{ page.flash.success }}
-            </div>
-
-            <div
-                v-if="page.flash.error"
-                class="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-800"
-                role="alert"
-            >
-                {{ page.flash.error }}
-            </div>
-
-            <div
                 v-if="showDeleteConfirm"
                 class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
                 role="dialog"
@@ -221,7 +209,23 @@ function confirmDelete() {
                         href="/installation-modules"
                         class="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2"
                     >
-                        Retour
+                        ← Retour aux affectations
+                    </Link>
+
+                    <Link
+                        v-if="installationModule.installation?.id"
+                        :href="`/installations/${installationModule.installation.id}`"
+                        class="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2"
+                    >
+                        Installation
+                    </Link>
+
+                    <Link
+                        v-if="installationModule.module?.id"
+                        :href="`/modules/${installationModule.module.id}`"
+                        class="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2"
+                    >
+                        Module catalogue
                     </Link>
 
                     <Link
@@ -232,6 +236,7 @@ function confirmDelete() {
                     </Link>
 
                     <button
+                        v-if="admin_urls.can_delete !== false"
                         type="button"
                         class="inline-flex items-center justify-center rounded-lg border border-red-200 bg-white px-4 py-2.5 text-sm font-medium text-red-700 shadow-sm transition hover:bg-red-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
                         :disabled="deleting"

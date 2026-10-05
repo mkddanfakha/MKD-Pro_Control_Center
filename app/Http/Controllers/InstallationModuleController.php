@@ -6,6 +6,7 @@ use App\Models\Installation;
 use App\Models\InstallationModule;
 use App\Models\Module;
 use App\Services\AuditLogService;
+use App\Support\AdminActionAvailability;
 use DateTimeInterface;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\RedirectResponse;
@@ -33,8 +34,19 @@ class InstallationModuleController extends Controller
             ->orderByDesc('id')
             ->paginate(15);
 
+        $installationModules->getCollection()->transform(function (InstallationModule $installationModule): InstallationModule {
+            $availability = AdminActionAvailability::installationModule();
+            $installationModule->setAttribute('can_delete', $availability['can_delete']);
+            $installationModule->setAttribute('delete_unavailable_reason', $availability['delete_unavailable_reason']);
+
+            return $installationModule;
+        });
+
         return Inertia::render('InstallationModules/Index', [
             'installationModules' => $installationModules,
+            'admin_urls' => [
+                'create' => route('installation-modules.create'),
+            ],
         ]);
     }
 
@@ -81,6 +93,10 @@ class InstallationModuleController extends Controller
 
         return Inertia::render('InstallationModules/Show', [
             'installationModule' => $installationModule,
+            'admin_urls' => AdminActionAvailability::mergeIntoAdminUrls(
+                AdminActionAvailability::installationModule(),
+                ['edit' => route('installation-modules.edit', $installationModule)],
+            ),
         ]);
     }
 
