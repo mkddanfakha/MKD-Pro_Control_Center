@@ -14,7 +14,7 @@ class ClientIndexFiltersTest extends TestCase
 
     public function test_index_without_filters_returns_all_clients(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
 
         $this->makeClient(['status' => 'active']);
         $this->makeClient(['status' => 'inactive']);
@@ -25,12 +25,13 @@ class ClientIndexFiltersTest extends TestCase
             ->assertInertia(fn (Assert $page) => $page
                 ->component('Clients/Index')
                 ->has('clients.data', 2)
-                ->where('filters.status', null));
+                ->where('filters.status', null)
+                ->where('filters.search', null));
     }
 
     public function test_index_filters_by_active_status(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
 
         $active = $this->makeClient(['status' => 'active']);
         $this->makeClient(['status' => 'inactive']);
@@ -47,7 +48,7 @@ class ClientIndexFiltersTest extends TestCase
 
     public function test_index_filters_by_inactive_status(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
 
         $this->makeClient(['status' => 'active']);
         $inactive = $this->makeClient(['status' => 'inactive']);
@@ -64,7 +65,7 @@ class ClientIndexFiltersTest extends TestCase
 
     public function test_index_active_filter_excludes_inactive_clients(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
 
         $this->makeClient(['status' => 'inactive', 'company_name' => 'Inactif Exclu']);
         $active = $this->makeClient(['status' => 'active', 'company_name' => 'Actif Seul']);
@@ -80,7 +81,7 @@ class ClientIndexFiltersTest extends TestCase
 
     public function test_index_inactive_filter_excludes_active_clients(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
 
         $this->makeClient(['status' => 'active', 'company_name' => 'Actif Exclu']);
         $inactive = $this->makeClient(['status' => 'inactive', 'company_name' => 'Inactif Seul']);
@@ -96,7 +97,7 @@ class ClientIndexFiltersTest extends TestCase
 
     public function test_index_rejects_invalid_status(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
 
         $this->actingAs($user)
             ->get(route('clients.index', ['status' => 'foo']))
@@ -105,7 +106,7 @@ class ClientIndexFiltersTest extends TestCase
 
     public function test_pagination_preserves_query_parameters(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
 
         for ($index = 0; $index < 16; $index++) {
             $this->makeClient(['status' => 'active']);

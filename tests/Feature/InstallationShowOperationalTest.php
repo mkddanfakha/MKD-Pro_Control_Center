@@ -21,7 +21,7 @@ class InstallationShowOperationalTest extends TestCase
 
     public function test_show_includes_client_on_installation(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
 
         $this->actingAs($user)
@@ -34,7 +34,7 @@ class InstallationShowOperationalTest extends TestCase
 
     public function test_show_exposes_installation_status(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation(['status' => 'suspended']);
 
         $this->actingAs($user)
@@ -46,7 +46,7 @@ class InstallationShowOperationalTest extends TestCase
 
     public function test_show_exposes_access_from_installation_access_service(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallationWithSubscription([
             'status' => Subscription::STATUS_GRACE_PERIOD,
         ]);
@@ -55,13 +55,12 @@ class InstallationShowOperationalTest extends TestCase
             ->get(route('installations.show', $installation))
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
-                ->where('access.accessible', true)
-                ->where('access.subscription_status', Subscription::STATUS_GRACE_PERIOD));
+                ->where('current_subscription.status', Subscription::STATUS_GRACE_PERIOD));
     }
 
     public function test_show_with_active_subscription_includes_subscription_link_data(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallationWithSubscription([
             'status' => Subscription::STATUS_ACTIVE,
         ]);
@@ -74,27 +73,27 @@ class InstallationShowOperationalTest extends TestCase
             ->get(route('installations.show', $installation))
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
-                ->has('lastSubscription')
-                ->where('lastSubscription.id', $subscription->id)
-                ->where('lastSubscription.status', Subscription::STATUS_ACTIVE));
+                ->has('current_subscription')
+                ->where('current_subscription.id', $subscription->id)
+                ->where('current_subscription.status', Subscription::STATUS_ACTIVE));
     }
 
     public function test_show_without_active_subscription(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
 
         $this->actingAs($user)
             ->get(route('installations.show', $installation))
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
-                ->where('lastSubscription', null)
-                ->where('credit', null));
+                ->where('current_subscription', null)
+                ->has('payments.data', 0));
     }
 
-    public function test_show_exposes_credit_summary_from_subscription_service(): void
+    public function test_show_exposes_credit_months_on_payment_rows(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
         $subscription = $this->makeSubscription($installation);
 
@@ -112,49 +111,14 @@ class InstallationShowOperationalTest extends TestCase
             ->get(route('installations.show', $installation))
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
-                ->has('credit')
-                ->where('credit.available_months', 6)
-                ->where('credit.payment_count', 1)
-                ->missing('credit.payments'));
-    }
-
-    public function test_show_exposes_zero_credit_when_no_remaining_months(): void
-    {
-        $user = User::factory()->create();
-        $installation = $this->makeInstallation();
-        $subscription = $this->makeSubscription($installation);
-
-        Payment::query()->create([
-            'subscription_id' => $subscription->id,
-            'amount' => 15000,
-            'currency' => 'XOF',
-            'status' => Payment::STATUS_PAID,
-            'paid_at' => '2026-09-01 12:00:00',
-            'monthly_unit_amount' => 15000,
-            'credit_months_purchased' => 1,
-        ]);
-
-        $payment = Payment::query()->where('subscription_id', $subscription->id)->firstOrFail();
-
-        SubscriptionPaymentConsumption::query()->create([
-            'payment_id' => $payment->id,
-            'subscription_id' => $subscription->id,
-            'period_start' => '2026-09-01 00:00:00',
-            'period_end' => '2026-09-30 23:59:59',
-            'consumed_at' => '2026-09-02 10:00:00',
-        ]);
-
-        $this->actingAs($user)
-            ->get(route('installations.show', $installation))
-            ->assertOk()
-            ->assertInertia(fn (Assert $page) => $page
-                ->where('credit.available_months', 0)
-                ->where('credit.payment_count', 1));
+                ->has('payments.data', 1)
+                ->where('payments.data.0.credit_months_purchased', 6)
+                ->missing('credit'));
     }
 
     public function test_show_exposes_payments_summary(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
         $subscription = $this->makeSubscription($installation);
 
@@ -164,6 +128,7 @@ class InstallationShowOperationalTest extends TestCase
             'currency' => 'XOF',
             'status' => Payment::STATUS_PAID,
             'paid_at' => '2026-09-01 12:00:00',
+            'created_at' => '2026-09-01 12:00:00',
             'monthly_unit_amount' => 15000,
             'credit_months_purchased' => 1,
         ]);
@@ -174,6 +139,7 @@ class InstallationShowOperationalTest extends TestCase
             'currency' => 'XOF',
             'status' => Payment::STATUS_PAID,
             'paid_at' => '2026-09-25 12:00:00',
+            'created_at' => '2026-09-25 12:00:00',
             'monthly_unit_amount' => 15000,
             'credit_months_purchased' => 6,
         ]);
@@ -182,16 +148,15 @@ class InstallationShowOperationalTest extends TestCase
             ->get(route('installations.show', $installation))
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
-                ->has('paymentsSummary')
-                ->where('paymentsSummary.count', 2)
-                ->where('paymentsSummary.last_payment.amount', 90000)
-                ->where('paymentsSummary.last_payment.currency', 'XOF')
-                ->where('paymentsSummary.last_payment.paid_at', '2026-09-25 12:00:00'));
+                ->has('payments.data', 2)
+                ->where('payments.data.0.amount', 90000)
+                ->where('payments.data.0.currency', 'XOF')
+                ->where('payments.data.0.paid_at', '2026-09-25 12:00:00'));
     }
 
-    public function test_show_exposes_assigned_modules(): void
+    public function test_show_does_not_expose_module_assignments_on_admin_detail(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
         $module = Module::query()->create([
             'name' => 'Module POS',
@@ -202,7 +167,7 @@ class InstallationShowOperationalTest extends TestCase
             'sort_order' => 0,
         ]);
 
-        $assignment = InstallationModule::query()->create([
+        InstallationModule::query()->create([
             'installation_id' => $installation->id,
             'module_id' => $module->id,
             'status' => InstallationModule::STATUS_ACTIVE,
@@ -213,17 +178,12 @@ class InstallationShowOperationalTest extends TestCase
             ->get(route('installations.show', $installation))
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
-                ->has('modules', 1)
-                ->where('modules.0.id', $assignment->id)
-                ->where('modules.0.status', InstallationModule::STATUS_ACTIVE)
-                ->where('modules.0.version', '1.2.0')
-                ->where('modules.0.module.name', 'Module POS')
-                ->where('modules.0.module.price', 5000));
+                ->missing('modules'));
     }
 
     public function test_show_does_not_use_terminated_subscription_as_current(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
 
         Subscription::query()->create([
@@ -237,14 +197,12 @@ class InstallationShowOperationalTest extends TestCase
             ->get(route('installations.show', $installation))
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
-                ->where('lastSubscription', null)
-                ->where('credit', null)
-                ->where('access.status', 'no_subscription'));
+                ->where('current_subscription', null));
     }
 
     public function test_show_includes_payments_summary_for_terminated_subscription_history(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
 
         $terminated = Subscription::query()->create([
@@ -268,17 +226,15 @@ class InstallationShowOperationalTest extends TestCase
             ->get(route('installations.show', $installation))
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
-                ->where('lastSubscription', null)
-                ->where('credit', null)
-                ->where('access.status', 'no_subscription')
-                ->where('paymentsSummary.count', 1)
-                ->where('paymentsSummary.last_payment.id', $payment->id)
-                ->where('paymentsSummary.last_payment.amount', 45000));
+                ->where('current_subscription', null)
+                ->has('payments.data', 1)
+                ->where('payments.data.0.id', $payment->id)
+                ->where('payments.data.0.amount', 45000));
     }
 
     public function test_show_does_not_trigger_obvious_n_plus_one(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
         $subscription = $this->makeSubscription($installation);
 
@@ -294,22 +250,6 @@ class InstallationShowOperationalTest extends TestCase
             ]);
         }
 
-        for ($moduleIndex = 0; $moduleIndex < 3; $moduleIndex++) {
-            $module = Module::query()->create([
-                'name' => 'Module '.$moduleIndex,
-                'slug' => 'mod-'.$moduleIndex.'-'.uniqid(),
-                'currency' => 'XOF',
-                'status' => Module::STATUS_ACTIVE,
-                'sort_order' => 0,
-            ]);
-
-            InstallationModule::query()->create([
-                'installation_id' => $installation->id,
-                'module_id' => $module->id,
-                'status' => InstallationModule::STATUS_ACTIVE,
-            ]);
-        }
-
         DB::flushQueryLog();
         DB::enableQueryLog();
 
@@ -317,16 +257,10 @@ class InstallationShowOperationalTest extends TestCase
 
         $paymentSelectQueries = collect(DB::getQueryLog())
             ->pluck('query')
-            ->filter(fn (string $query) => str_contains(strtolower($query), ' from `payments`'))
+            ->filter(fn (string $query) => str_contains(strtolower($query), 'payments'))
             ->count();
 
-        $moduleSelectQueries = collect(DB::getQueryLog())
-            ->pluck('query')
-            ->filter(fn (string $query) => str_contains(strtolower($query), ' from `modules`'))
-            ->count();
-
-        $this->assertLessThanOrEqual(3, $paymentSelectQueries);
-        $this->assertLessThanOrEqual(2, $moduleSelectQueries);
+        $this->assertLessThanOrEqual(4, $paymentSelectQueries);
     }
 
     /**

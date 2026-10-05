@@ -21,7 +21,7 @@ class InstallationShowAccessTest extends TestCase
     {
         $this->travelTo('2026-10-15 12:00:00');
 
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallationWithSubscription([
             'status' => Subscription::STATUS_ACTIVE,
             'current_period_end' => '2026-10-31 23:59:59',
@@ -32,18 +32,15 @@ class InstallationShowAccessTest extends TestCase
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
                 ->component('Installations/Show')
-                ->where('access.accessible', true)
-                ->where('access.status', 'accessible')
-                ->where('access.subscription_status', Subscription::STATUS_ACTIVE)
-                ->has('lastSubscription')
-                ->where('lastSubscription.status', Subscription::STATUS_ACTIVE));
+                ->has('current_subscription')
+                ->where('current_subscription.status', Subscription::STATUS_ACTIVE));
     }
 
     public function test_show_includes_accessible_state_for_grace_period_subscription(): void
     {
         $this->travelTo('2026-11-05 12:00:00');
 
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallationWithSubscription([
             'status' => Subscription::STATUS_GRACE_PERIOD,
             'grace_period_ends_at' => '2026-11-07 23:59:59',
@@ -53,15 +50,12 @@ class InstallationShowAccessTest extends TestCase
             ->get(route('installations.show', $installation))
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
-                ->where('access.accessible', true)
-                ->where('access.status', 'accessible')
-                ->where('access.subscription_status', Subscription::STATUS_GRACE_PERIOD)
-                ->where('lastSubscription.status', Subscription::STATUS_GRACE_PERIOD));
+                ->where('current_subscription.status', Subscription::STATUS_GRACE_PERIOD));
     }
 
     public function test_show_includes_suspended_access_state(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallationWithSubscription([
             'status' => Subscription::STATUS_SUSPENDED,
         ]);
@@ -70,8 +64,7 @@ class InstallationShowAccessTest extends TestCase
             ->get(route('installations.show', $installation))
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
-                ->where('access.accessible', false)
-                ->where('access.status', 'suspended'));
+                ->where('current_subscription.status', Subscription::STATUS_SUSPENDED));
     }
 
     public function test_installation_access_becomes_accessible_after_credit_consumption_reactivates_suspended_subscription(): void
@@ -121,7 +114,7 @@ class InstallationShowAccessTest extends TestCase
 
     public function test_show_includes_terminated_access_state(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallationWithSubscription([
             'status' => Subscription::STATUS_TERMINATED,
         ]);
@@ -130,31 +123,26 @@ class InstallationShowAccessTest extends TestCase
             ->get(route('installations.show', $installation))
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
-                ->where('access.accessible', false)
-                ->where('access.status', 'no_subscription')
-                ->where('access.subscription_status', null));
+                ->where('current_subscription', null));
     }
 
     public function test_show_includes_no_subscription_access_state(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
 
         $this->actingAs($user)
             ->get(route('installations.show', $installation))
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
-                ->where('access.accessible', false)
-                ->where('access.status', 'no_subscription')
-                ->where('access.subscription_status', null)
-                ->where('lastSubscription', null));
+                ->where('current_subscription', null));
     }
 
     public function test_show_terminated_installation_with_active_subscription_and_valid_period_marks_access_accessible(): void
     {
         $this->travelTo('2026-10-15 12:00:00');
 
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation(['status' => 'terminated']);
 
         Subscription::query()->create([
@@ -173,18 +161,15 @@ class InstallationShowAccessTest extends TestCase
             ->assertInertia(fn (Assert $page) => $page
                 ->component('Installations/Show')
                 ->where('installation.status', 'terminated')
-                ->where('access.accessible', true)
-                ->where('access.status', 'accessible')
-                ->where('access.subscription_status', Subscription::STATUS_ACTIVE)
-                ->has('lastSubscription')
-                ->where('lastSubscription.status', Subscription::STATUS_ACTIVE));
+                ->has('current_subscription')
+                ->where('current_subscription.status', Subscription::STATUS_ACTIVE));
     }
 
     public function test_show_terminated_installation_uses_active_subscription_when_terminated_subscription_is_historical(): void
     {
         $this->travelTo('2026-10-15 12:00:00');
 
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation(['status' => 'terminated']);
 
         Subscription::query()->create([
@@ -209,15 +194,12 @@ class InstallationShowAccessTest extends TestCase
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
                 ->where('installation.status', 'terminated')
-                ->where('access.accessible', true)
-                ->where('access.status', 'accessible')
-                ->where('access.subscription_status', Subscription::STATUS_ACTIVE)
-                ->where('lastSubscription.status', Subscription::STATUS_ACTIVE));
+                ->where('current_subscription.status', Subscription::STATUS_ACTIVE));
     }
 
     public function test_show_preserves_installation_status_when_subscription_is_active(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation(['status' => 'suspended']);
 
         Subscription::query()->create([
@@ -232,13 +214,12 @@ class InstallationShowAccessTest extends TestCase
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
                 ->where('installation.status', 'suspended')
-                ->where('access.accessible', true)
-                ->where('lastSubscription.status', Subscription::STATUS_ACTIVE));
+                ->where('current_subscription.status', Subscription::STATUS_ACTIVE));
     }
 
     public function test_show_last_subscription_includes_expected_fields(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallationWithSubscription([
             'status' => Subscription::STATUS_ACTIVE,
             'amount' => 9900,
@@ -251,7 +232,7 @@ class InstallationShowAccessTest extends TestCase
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
                 ->missing('installation.subscriptions')
-                ->has('lastSubscription', fn (Assert $sub) => $sub
+                ->has('current_subscription', fn (Assert $sub) => $sub
                     ->has('id')
                     ->where('status', Subscription::STATUS_ACTIVE)
                     ->where('amount', 9900)
@@ -262,6 +243,7 @@ class InstallationShowAccessTest extends TestCase
                     ->has('grace_period_ends_at')
                     ->has('suspended_at')
                     ->has('terminated_at')
+                    ->has('show_url')
                     ->missing('notes')
                     ->missing('password')
                     ->missing('token')));
@@ -269,7 +251,7 @@ class InstallationShowAccessTest extends TestCase
 
     public function test_show_does_not_expose_subscription_history_on_installation(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
 
         Subscription::query()->create([
@@ -293,8 +275,8 @@ class InstallationShowAccessTest extends TestCase
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
                 ->missing('installation.subscriptions')
-                ->missing('lastSubscription.notes')
-                ->where('lastSubscription.status', Subscription::STATUS_ACTIVE));
+                ->missing('current_subscription.notes')
+                ->where('current_subscription.status', Subscription::STATUS_ACTIVE));
     }
 
     /**

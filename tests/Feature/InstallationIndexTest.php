@@ -14,9 +14,9 @@ class InstallationIndexTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_index_includes_installation_status_and_computed_access(): void
+    public function test_index_includes_installation_status_and_current_subscription(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation(['status' => 'active']);
 
         Subscription::query()->create([
@@ -35,15 +35,14 @@ class InstallationIndexTest extends TestCase
                 ->has('installations.data', 1)
                 ->where('installations.data.0.id', $installation->id)
                 ->where('installations.data.0.status', 'active')
-                ->where('installations.data.0.access.accessible', false)
-                ->where('installations.data.0.access.status', 'suspended')
-                ->where('installations.data.0.access.subscription_status', Subscription::STATUS_SUSPENDED)
-                ->missing('installations.data.0.subscriptions'));
+                ->where('installations.data.0.current_subscription.status', Subscription::STATUS_SUSPENDED)
+                ->missing('installations.data.0.subscriptions')
+                ->missing('installations.data.0.database_name'));
     }
 
-    public function test_index_access_reflects_grace_period_subscription_status(): void
+    public function test_index_exposes_grace_period_as_current_subscription(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation(['status' => 'suspended']);
 
         Subscription::query()->create([
@@ -59,14 +58,12 @@ class InstallationIndexTest extends TestCase
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
                 ->where('installations.data.0.status', 'suspended')
-                ->where('installations.data.0.access.accessible', true)
-                ->where('installations.data.0.access.status', 'accessible')
-                ->where('installations.data.0.access.subscription_status', Subscription::STATUS_GRACE_PERIOD));
+                ->where('installations.data.0.current_subscription.status', Subscription::STATUS_GRACE_PERIOD));
     }
 
-    public function test_index_reports_no_subscription_access_for_terminated_only_subscription(): void
+    public function test_index_reports_null_current_subscription_for_terminated_only_subscription(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
 
         Subscription::query()->create([
@@ -81,9 +78,7 @@ class InstallationIndexTest extends TestCase
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
                 ->where('installations.data.0.id', $installation->id)
-                ->where('installations.data.0.access.accessible', false)
-                ->where('installations.data.0.access.status', 'no_subscription')
-                ->where('installations.data.0.access.subscription_status', null));
+                ->where('installations.data.0.current_subscription', null));
     }
 
     /**

@@ -1,46 +1,127 @@
 <script setup>
 import AdminLayout from '@/Layouts/AdminLayout.vue';
-import { Head, Link, usePage } from '@inertiajs/vue3';
+import {
+    displayAdminValue,
+    formatAdminDateTimeUtc,
+} from '@/lib/adminPresentation.js';
+import { Head, Link, router, usePage } from '@inertiajs/vue3';
+import { ref } from 'vue';
 
-defineProps({
+const props = defineProps({
+    admin_urls: {
+        type: Object,
+        default: () => ({}),
+    },
+    navigation: {
+        type: Object,
+        default: () => ({}),
+    },
     installation: {
         type: Object,
         required: true,
     },
-    access: {
+    current_subscription: {
+        type: Object,
+        default: null,
+    },
+    payments: {
         type: Object,
         required: true,
     },
-    lastSubscription: {
+    reminders: {
         type: Object,
-        default: null,
+        required: true,
     },
-    credit: {
-        type: Object,
-        default: null,
-    },
-    paymentsSummary: {
-        type: Object,
-        default: () => ({ count: 0, last_payment: null }),
-    },
-    modules: {
+    installation_modules: {
         type: Array,
         default: () => [],
     },
+    administrative_readiness: {
+        type: Object,
+        default: null,
+    },
+
 });
 
 const page = usePage();
+const deleting = ref(false);
+const showDeleteConfirm = ref(false);
+function cancelDelete() {
+    if (deleting.value) {
+        return;
+    }
+
+    showDeleteConfirm.value = false;
+}
+
+function confirmDelete() {
+    if (deleting.value) {
+        return;
+    }
+
+    deleting.value = true;
+
+    router.delete(`/installations/${props.installation.id}`, {
+        onFinish: () => {
+            deleting.value = false;
+            showDeleteConfirm.value = false;
+        },
+    });
+}
+
 
 function displayValue(value) {
     return value && String(value).trim() !== '' ? value : '—';
 }
 
+function formatDateTime(value) {
+    if (!value) {
+        return '—';
+    }
+
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) {
+        return '—';
+    }
+
+    const datePart = new Intl.DateTimeFormat('fr-FR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+    }).format(date);
+
+    const timePart = new Intl.DateTimeFormat('fr-FR', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+    }).format(date);
+
+    return `${datePart} ${timePart}`;
+}
+
+function formatPeriodEndUtc(value) {
+    if (!value) {
+        return '—';
+    }
+
+    return new Intl.DateTimeFormat('fr-FR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+        timeZone: 'UTC',
+    }).format(new Date(value));
+}
+
 function installationStatusLabel(status) {
     const labels = {
-        active: 'Installation active',
-        inactive: 'Installation inactive',
-        suspended: 'Installation suspendue',
-        terminated: 'Installation terminée',
+        active: 'Actif',
+        inactive: 'Inactif',
+        suspended: 'Suspendu',
+        terminated: 'Terminé',
     };
 
     return labels[status] ?? status;
@@ -68,29 +149,87 @@ function subscriptionStatusLabel(status) {
     return labels[status] ?? status;
 }
 
-function subscriptionStatusShortLabel(status) {
+function subscriptionStatusBadgeClass(status) {
+    const classes = {
+        active: 'bg-emerald-50 text-emerald-800 ring-emerald-200',
+        grace_period: 'bg-amber-50 text-amber-900 ring-amber-200',
+        suspended: 'bg-orange-50 text-orange-900 ring-orange-200',
+        terminated: 'bg-gray-100 text-gray-700 ring-gray-300',
+    };
+
+    return classes[status] ?? 'bg-gray-100 text-gray-600 ring-gray-200';
+}
+
+function paymentStatusLabel(status) {
     const labels = {
-        active: 'Active',
-        grace_period: 'Période de grâce',
-        suspended: 'Suspendue',
-        terminated: 'Terminée',
+        pending: 'En attente',
+        paid: 'Payé',
+        failed: 'Échoué',
+        refunded: 'Remboursé',
     };
 
     return labels[status] ?? status;
 }
 
-function installationStatusShortLabel(status) {
+function paymentStatusBadgeClass(status) {
+    const classes = {
+        pending: 'bg-amber-50 text-amber-900 ring-amber-200',
+        paid: 'bg-emerald-50 text-emerald-800 ring-emerald-200',
+        failed: 'bg-red-50 text-red-800 ring-red-200',
+        refunded: 'bg-gray-100 text-gray-700 ring-gray-300',
+    };
+
+    return classes[status] ?? 'bg-gray-100 text-gray-600 ring-gray-200';
+}
+
+function reminderStatusLabel(status) {
     const labels = {
-        active: 'Active',
-        inactive: 'Inactive',
-        suspended: 'Suspendue',
-        terminated: 'Terminée',
+        detected: 'Détecté',
+        sent: 'Envoyé',
+        failed: 'Échec',
     };
 
     return labels[status] ?? status;
 }
 
-function moduleAssignmentStatusLabel(status) {
+function reminderStatusBadgeClass(status) {
+    const classes = {
+        detected: 'bg-amber-50 text-amber-900 ring-amber-200',
+        sent: 'bg-emerald-50 text-emerald-800 ring-emerald-200',
+        failed: 'bg-red-50 text-red-800 ring-red-200',
+    };
+
+    return classes[status] ?? 'bg-gray-100 text-gray-600 ring-gray-200';
+}
+
+function thresholdLabel(days) {
+    if (days === 0) {
+        return 'J0';
+    }
+
+    return `J-${days}`;
+}
+
+function formatAmount(amount, currency) {
+    const formatted = new Intl.NumberFormat('fr-FR', {
+        maximumFractionDigits: 0,
+    }).format(Number(amount ?? 0));
+
+    return `${formatted} ${currency ?? 'XOF'}`;
+}
+
+function visitPagination(url) {
+    if (!url) {
+        return;
+    }
+
+    router.get(url, {}, {
+        preserveState: true,
+        preserveScroll: true,
+    });
+}
+
+function installationModuleStatusLabel(status) {
     const labels = {
         active: 'Actif',
         inactive: 'Inactif',
@@ -99,834 +238,679 @@ function moduleAssignmentStatusLabel(status) {
     return labels[status] ?? status;
 }
 
-function moduleAssignmentStatusBadgeClass(status) {
+function installationModuleStatusBadgeClass(status) {
     const classes = {
-        active: 'bg-sky-50 text-sky-800 ring-sky-200',
+        active: 'bg-emerald-50 text-emerald-800 ring-emerald-200',
         inactive: 'bg-gray-100 text-gray-600 ring-gray-200',
     };
 
     return classes[status] ?? 'bg-gray-100 text-gray-600 ring-gray-200';
 }
 
-function subscriptionStatusBadgeClass(status) {
-    const classes = {
-        active: 'bg-violet-50 text-violet-900 ring-violet-200',
-        grace_period: 'bg-violet-100 text-violet-900 ring-violet-300',
-        suspended: 'bg-orange-50 text-orange-900 ring-orange-200',
-        terminated: 'bg-stone-100 text-stone-700 ring-stone-300',
-    };
-
-    return classes[status] ?? 'bg-violet-50 text-violet-900 ring-violet-200';
-}
-
-function accessPrimaryLabel(access) {
-    if (!access?.accessible) {
-        return 'Accès non autorisé';
+function readinessStateSymbol(state) {
+    if (state === 'complete') {
+        return '✓';
     }
 
-    return 'Accès autorisé selon l’abonnement';
-}
-
-function accessDetailLabel(access) {
-    if (!access) {
-        return 'Aucun abonnement courant';
-    }
-
-    if (access.accessible) {
-        if (access.subscription_status === 'grace_period') {
-            return 'Période de grâce';
-        }
-
-        if (access.subscription_status === 'active') {
-            return 'Abonnement actif';
-        }
-
-        return null;
-    }
-
-    if (
-        access.subscription_status == null
-        || access.status === 'no_subscription'
-        || access.status === 'terminated'
-    ) {
-        return 'Aucun abonnement courant';
-    }
-
-    if (access.subscription_status === 'active') {
-        return 'Période échue';
-    }
-
-    if (access.subscription_status === 'grace_period') {
-        return 'Période de grâce échue';
-    }
-
-    if (access.subscription_status === 'suspended') {
-        return 'Abonnement suspendu';
-    }
-
-    return null;
-}
-
-function accessBadgeClass(access) {
-    if (access?.accessible) {
-        return 'border-2 border-emerald-600 bg-white text-emerald-800';
-    }
-
-    return 'border-2 border-amber-600 bg-white text-amber-900';
-}
-
-function formatMoney(amount, currency) {
-    if (amount == null || amount === '') {
+    if (state === 'empty') {
         return '—';
     }
 
-    const formatted = new Intl.NumberFormat('fr-FR', {
-        minimumFractionDigits: 0,
-        maximumFractionDigits: 2,
-    }).format(Number(amount));
-
-    return currency ? `${formatted} ${currency}` : formatted;
+    return '✗';
 }
 
-function formatDateTime(value) {
-    if (!value) {
-        return '—';
+function readinessStateClass(state) {
+    if (state === 'complete') {
+        return 'text-emerald-700';
     }
 
-    const date = new Date(value);
-
-    const datePart = new Intl.DateTimeFormat('fr-FR', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-    }).format(date);
-
-    const timePart = new Intl.DateTimeFormat('fr-FR', {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false,
-    }).format(date);
-
-    return `${datePart} ${timePart}`;
-}
-
-function formatDateOnly(value) {
-    if (!value || String(value).trim() === '') {
-        return '—';
+    if (state === 'empty') {
+        return 'text-gray-500';
     }
 
-    const date = new Date(value);
-
-    if (Number.isNaN(date.getTime())) {
-        return '—';
-    }
-
-    return new Intl.DateTimeFormat('fr-FR', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-    }).format(date);
-}
-
-function formatPeriodRange(start, end) {
-    const startLabel = formatDateOnly(start);
-    const endLabel = formatDateOnly(end);
-
-    if (startLabel === '—' && endLabel === '—') {
-        return '—';
-    }
-
-    return `${startLabel} → ${endLabel}`;
-}
-
-function creditMonthsHeadline(months) {
-    const value = Number(months);
-
-    if (Number.isNaN(value) || value <= 0) {
-        return null;
-    }
-
-    if (value === 1) {
-        return '1 mois';
-    }
-
-    return `${value} mois`;
-}
-
-function paymentsCountLabel(count) {
-    const value = Number(count);
-
-    if (Number.isNaN(value) || value <= 0) {
-        return null;
-    }
-
-    if (value === 1) {
-        return '1 paiement';
-    }
-
-    return `${value} paiements`;
+    return 'text-amber-700';
 }
 </script>
 
 <template>
-    <Head :title="installation.name ? `Installation — ${installation.name}` : 'Installation'" />
+    <Head :title="installation.name" />
 
     <AdminLayout>
-        <div>
-            <div
-                v-if="page.flash.success"
-                class="mb-6 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm font-medium text-green-800"
-                role="status"
-            >
-                {{ page.flash.success }}
-            </div>
-
-            <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div class="space-y-8">
+            <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                    <h1 class="text-2xl font-bold text-gray-900">
-                        Installation
-                    </h1>
-
-                    <p class="mt-1 text-sm text-gray-500">
-                        {{ displayValue(installation.name) }}
-                    </p>
-                </div>
-
-                <div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
                     <Link
-                        href="/installations"
-                        class="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2"
+                        :href="navigation.installations_index ?? '/installations'"
+                        class="text-sm font-medium text-gray-600 underline-offset-2 hover:text-gray-900 hover:underline"
                     >
-                        Retour
+                        ← Retour aux installations
                     </Link>
 
+                    <div class="mt-4 flex flex-wrap items-center gap-3">
+                        <h1 class="text-2xl font-bold text-gray-900">
+                            {{ installation.name }}
+                        </h1>
+                        <span
+                            class="inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset"
+                            :class="installationStatusBadgeClass(installation.status)"
+                        >
+                            {{ installationStatusLabel(installation.status) }}
+                        </span>
+                    </div>
+
+                    <p class="mt-2 text-sm text-gray-600">
+                        {{ displayValue(installation.subdomain) }}
+                        <span
+                            v-if="installation.version"
+                            class="text-gray-400"
+                        > · v{{ installation.version }}</span>
+                    </p>
+
+                </div>
+
+                <div class="flex flex-wrap gap-3">
                     <Link
-                        :href="`/installations/${installation.id}/edit`"
-                        class="inline-flex items-center justify-center rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-gray-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2"
+                        v-if="navigation.edit"
+                        :href="navigation.edit"
+                        class="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-gray-50"
                     >
                         Modifier
                     </Link>
+                    <button
+                        v-if="admin_urls.can_delete !== false"
+                        type="button"
+                        class="inline-flex items-center justify-center rounded-lg border border-red-200 bg-white px-4 py-2.5 text-sm font-medium text-red-700 shadow-sm transition hover:bg-red-50 disabled:opacity-60"
+                        :disabled="deleting"
+                        @click="showDeleteConfirm = true"
+                    >
+                        Supprimer
+                    </button>
+                    <p
+                        v-else-if="admin_urls.delete_unavailable_reason"
+                        class="text-sm text-gray-600"
+                    >
+                        {{ admin_urls.delete_unavailable_reason }}
+                    </p>
                 </div>
             </div>
 
-            <div class="mt-8 space-y-8">
-                <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">
+            <div
+                v-if="showDeleteConfirm"
+                class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+                role="dialog"
+                aria-modal="true"
+                @click.self="cancelDelete"
+            >
+                <div class="w-full max-w-md rounded-xl bg-white p-6 shadow-lg ring-1 ring-gray-200">
                     <h2 class="text-lg font-semibold text-gray-900">
-                        Installation
+                        Supprimer l'installation
                     </h2>
-
-                    <p class="mt-1 text-sm text-gray-500">
-                        État administratif et informations techniques de l’installation.
+                    <p class="mt-3 text-sm text-gray-600">
+                        Voulez-vous vraiment supprimer cette installation ?
                     </p>
+                    <div class="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                        <button
+                            type="button"
+                            class="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700"
+                            :disabled="deleting"
+                            @click="cancelDelete"
+                        >
+                            Annuler
+                        </button>
+                        <button
+                            type="button"
+                            class="rounded-lg bg-red-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-60"
+                            :disabled="deleting"
+                            @click="confirmDelete"
+                        >
+                            {{ deleting ? 'Suppression…' : 'Supprimer' }}
+                        </button>
+                    </div>
+                </div>
+            </div>
 
-                    <dl class="mt-6 grid gap-6 sm:grid-cols-2">
-                        <div>
-                            <dt class="text-sm font-medium text-gray-500">
-                                Nom
-                            </dt>
-                            <dd class="mt-1 text-sm font-medium text-gray-900">
-                                {{ displayValue(installation.name) }}
-                            </dd>
-                        </div>
+            <section
+                v-if="administrative_readiness"
+                class="rounded-xl border border-sky-100 bg-sky-50/60 p-6 shadow-sm ring-1 ring-sky-100 sm:p-8"
+            >
+                <h2 class="text-lg font-semibold text-gray-900">
+                    Enregistrement et déploiement
+                </h2>
+                <dl class="mt-4 grid gap-4 sm:grid-cols-2">
+                    <div>
+                        <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                            {{ administrative_readiness.control_center_registration?.label }}
+                        </dt>
+                        <dd class="mt-1 text-sm font-medium text-emerald-800">
+                            {{ administrative_readiness.control_center_registration?.value }}
+                        </dd>
+                    </div>
+                    <div>
+                        <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                            {{ administrative_readiness.technical_deployment?.label }}
+                        </dt>
+                        <dd class="mt-1 text-sm font-medium text-gray-700">
+                            {{ administrative_readiness.technical_deployment?.value }}
+                        </dd>
+                    </div>
+                </dl>
+                <p class="mt-4 text-sm text-gray-600">
+                    {{ administrative_readiness.status_administrative_note }}
+                </p>
+            </section>
 
+            <section
+                v-if="administrative_readiness?.checklist?.length"
+                class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8"
+            >
+                <h2 class="text-lg font-semibold text-gray-900">
+                    Synthèse administrative
+                </h2>
+                <p class="mt-1 text-xs text-gray-500">
+                    Lecture documentaire — aucune vérification serveur distante.
+                </p>
+                <ul class="mt-6 space-y-3">
+                    <li
+                        v-for="item in administrative_readiness.checklist"
+                        :key="item.key"
+                        class="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm"
+                    >
+                        <span
+                            class="font-semibold tabular-nums"
+                            :class="readinessStateClass(item.state)"
+                        >{{ readinessStateSymbol(item.state) }}</span>
+                        <span class="font-medium text-gray-900">{{ item.label }}</span>
+                        <span class="text-gray-600">— {{ item.detail }}</span>
+                    </li>
+                </ul>
+                <p class="mt-4 text-sm text-gray-600">
+                    <span class="font-medium text-gray-800">Déploiement technique :</span>
+                    non suivi actuellement (aucun ✓ déployé).
+                </p>
+            </section>
+
+            <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">
+                <h2 class="text-lg font-semibold text-gray-900">
+                    Informations générales
+                </h2>
+                <dl class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    <div>
+                        <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                            Domaine
+                        </dt>
+                        <dd class="mt-1 text-sm text-gray-900">
+                            {{ displayValue(installation.domain) }}
+                        </dd>
+                    </div>
+                    <div>
+                        <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                            Date d'installation
+                        </dt>
+                        <dd class="mt-1 text-sm text-gray-900">
+                            {{ formatDateTime(installation.installed_at) }}
+                        </dd>
+                    </div>
+                    <div>
+                        <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                            Dernière activité
+                        </dt>
+                        <dd class="mt-1 text-sm text-gray-900">
+                            {{ formatDateTime(installation.last_seen_at) }}
+                        </dd>
+                    </div>
+                    <div>
+                        <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                            Suspendue le
+                        </dt>
+                        <dd class="mt-1 text-sm text-gray-900">
+                            {{ formatDateTime(installation.suspended_at) }}
+                        </dd>
+                    </div>
+                    <div>
+                        <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                            Terminée le
+                        </dt>
+                        <dd class="mt-1 text-sm text-gray-900">
+                            {{ formatDateTime(installation.terminated_at) }}
+                        </dd>
+                    </div>
+                </dl>
+            </section>
+
+            <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                    <h2 class="text-lg font-semibold text-gray-900">
+                        Client
+                    </h2>
+                    <Link
+                        v-if="navigation.client_show"
+                        :href="navigation.client_show"
+                        class="text-sm font-medium text-gray-700 underline-offset-2 hover:underline"
+                    >
+                        Voir le client
+                    </Link>
+                </div>
+                <dl
+                    v-if="installation.client"
+                    class="mt-6 grid gap-4 sm:grid-cols-2"
+                >
+                    <div>
+                        <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                            Raison sociale
+                        </dt>
+                        <dd class="mt-1 text-sm font-medium text-gray-900">
+                            {{ installation.client.company_name }}
+                        </dd>
+                    </div>
+                    <div>
+                        <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                            Contact
+                        </dt>
+                        <dd class="mt-1 text-sm text-gray-900">
+                            {{ displayValue(installation.client.contact_name) }}
+                        </dd>
+                    </div>
+                    <div>
+                        <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                            E-mail
+                        </dt>
+                        <dd class="mt-1 text-sm text-gray-900">
+                            {{ displayValue(installation.client.email) }}
+                        </dd>
+                    </div>
+                    <div>
+                        <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                            Téléphone
+                        </dt>
+                        <dd class="mt-1 text-sm text-gray-900">
+                            {{ displayValue(installation.client.phone) }}
+                        </dd>
+                    </div>
+                    <div class="sm:col-span-2">
+                        <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                            Adresse
+                        </dt>
+                        <dd class="mt-1 text-sm text-gray-900">
+                            {{ displayValue(installation.client.address) }}
+                            <span v-if="installation.client.city"> — {{ installation.client.city }}</span>
+                            <span v-if="installation.client.country"> ({{ installation.client.country }})</span>
+                        </dd>
+                    </div>
+                </dl>
+                <p
+                    v-else
+                    class="mt-4 text-sm text-gray-500"
+                >
+                    Client introuvable.
+                </p>
+            </section>
+
+            <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                    <h2 class="text-lg font-semibold text-gray-900">
+                        Modules affectés
+                    </h2>
+                    <Link
+                        v-if="navigation.installation_modules_index"
+                        :href="navigation.installation_modules_index"
+                        class="text-sm font-medium text-gray-700 underline-offset-2 hover:underline"
+                    >
+                        Gérer les affectations
+                    </Link>
+                </div>
+                <div
+                    v-if="installation_modules.length"
+                    class="mt-6 overflow-x-auto"
+                >
+                    <table class="min-w-full divide-y divide-gray-200 text-sm">
+                        <thead>
+                            <tr class="text-left text-xs font-medium uppercase tracking-wide text-gray-500">
+                                <th class="pb-2 pr-4">
+                                    Module
+                                </th>
+                                <th class="pb-2 pr-4">
+                                    Statut
+                                </th>
+                                <th class="pb-2 pr-4">
+                                    Version
+                                </th>
+                                <th class="pb-2 pr-4">
+                                    Activé le
+                                </th>
+                                <th class="pb-2 pr-4">
+                                    Désactivé le
+                                </th>
+                                <th class="pb-2 pr-4">
+                                    Tarif catalogue
+                                </th>
+                                <th class="pb-2">
+                                    Détail
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-100">
+                            <tr
+                                v-for="row in installation_modules"
+                                :key="row.id"
+                            >
+                                <td class="py-3 pr-4 font-medium text-gray-900">
+                                    {{ row.module?.name ?? '—' }}
+                                </td>
+                                <td class="py-3 pr-4">
+                                    <span
+                                        class="inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset"
+                                        :class="installationModuleStatusBadgeClass(row.status)"
+                                    >
+                                        {{ installationModuleStatusLabel(row.status) }}
+                                    </span>
+                                </td>
+                                <td class="py-3 pr-4 text-gray-700">
+                                    {{ displayValue(row.version) }}
+                                </td>
+                                <td class="py-3 pr-4 text-gray-700">
+                                    {{ formatDateTime(row.activated_at) }}
+                                </td>
+                                <td class="py-3 pr-4 text-gray-700">
+                                    {{ formatDateTime(row.deactivated_at) }}
+                                </td>
+                                <td class="py-3 pr-4 text-gray-700">
+                                    <template v-if="row.module?.price != null">
+                                        {{ formatAmount(row.module.price, row.module.currency) }}
+                                    </template>
+                                    <template v-else>
+                                        —
+                                    </template>
+                                </td>
+                                <td class="py-3">
+                                    <Link
+                                        v-if="row.show_url"
+                                        :href="row.show_url"
+                                        class="text-sm font-medium text-gray-700 underline-offset-2 hover:underline"
+                                    >
+                                        Voir
+                                    </Link>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <p
+                    v-else
+                    class="mt-4 text-sm text-gray-600"
+                >
+                    Aucun module affecté à cette installation.
+                </p>
+            </section>
+
+            <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">
+                <h2 class="text-lg font-semibold text-gray-900">
+                    Abonnement courant
+                </h2>
+                <template v-if="current_subscription">
+                    <dl class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                         <div>
-                            <dt class="text-sm font-medium text-gray-500">
-                                Statut de l’installation
+                            <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                Statut
                             </dt>
                             <dd class="mt-1">
                                 <span
                                     class="inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset"
-                                    :class="installationStatusBadgeClass(installation.status)"
+                                    :class="subscriptionStatusBadgeClass(current_subscription.status)"
                                 >
-                                    {{ installationStatusLabel(installation.status) }}
+                                    {{ subscriptionStatusLabel(current_subscription.status) }}
                                 </span>
                             </dd>
                         </div>
-
                         <div>
-                            <dt class="text-sm font-medium text-gray-500">
-                                Client
+                            <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                Tarif mensuel
                             </dt>
                             <dd class="mt-1 text-sm text-gray-900">
-                                {{ displayValue(installation.client?.company_name) }}
-                            </dd>
-                            <dd
-                                v-if="installation.client?.id"
-                                class="mt-2"
-                            >
-                                <Link
-                                    :href="`/clients/${installation.client.id}`"
-                                    class="text-sm font-medium text-gray-700 underline-offset-2 hover:text-gray-900 hover:underline"
-                                >
-                                    Voir le client
-                                </Link>
+                                {{ formatAmount(current_subscription.amount, current_subscription.currency) }}
                             </dd>
                         </div>
-
                         <div>
-                            <dt class="text-sm font-medium text-gray-500">
-                                Sous-domaine
+                            <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                Fin de période (UTC)
                             </dt>
                             <dd class="mt-1 text-sm text-gray-900">
-                                {{ displayValue(installation.subdomain) }}
+                                {{ formatPeriodEndUtc(current_subscription.current_period_end) }}
                             </dd>
                         </div>
-
                         <div>
-                            <dt class="text-sm font-medium text-gray-500">
-                                Domaine
-                            </dt>
-                            <dd class="mt-1 text-sm break-all text-gray-900">
-                                {{ displayValue(installation.domain) }}
-                            </dd>
-                        </div>
-
-                        <div>
-                            <dt class="text-sm font-medium text-gray-500">
-                                Version
+                            <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                Début contrat
                             </dt>
                             <dd class="mt-1 text-sm text-gray-900">
-                                {{ displayValue(installation.version) }}
+                                {{ formatDateTime(current_subscription.starts_at) }}
+                            </dd>
+                        </div>
+                        <div>
+                            <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                Période en cours
+                            </dt>
+                            <dd class="mt-1 text-sm text-gray-900">
+                                {{ formatDateTime(current_subscription.current_period_start) }}
+                                →
+                                {{ formatPeriodEndUtc(current_subscription.current_period_end) }}
+                            </dd>
+                        </div>
+                        <div>
+                            <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                Fin période de grâce
+                            </dt>
+                            <dd class="mt-1 text-sm text-gray-900">
+                                {{ formatDateTime(current_subscription.grace_period_ends_at) }}
                             </dd>
                         </div>
                     </dl>
-                </section>
-
-                <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-violet-100 sm:p-8">
-                    <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                        <div>
-                            <h2 class="text-lg font-semibold text-gray-900">
-                                Abonnement actuel
-                            </h2>
-
-                            <p class="mt-1 text-sm text-gray-500">
-                                Abonnement non terminé pris en compte pour l’accès et le crédit.
-                            </p>
-                        </div>
-
-                        <div
-                            v-if="lastSubscription?.id"
-                            class="flex flex-col gap-2 sm:items-end"
-                        >
-                            <Link
-                                :href="`/subscriptions/${lastSubscription.id}`"
-                                class="inline-flex shrink-0 items-center justify-center rounded-lg border border-violet-200 bg-white px-4 py-2 text-sm font-medium text-violet-900 shadow-sm transition hover:bg-violet-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-700 focus-visible:ring-offset-2"
-                            >
-                                Voir l’abonnement
-                            </Link>
-
-                            <Link
-                                :href="`/subscriptions/${lastSubscription.id}`"
-                                class="text-sm font-medium text-violet-800 underline-offset-2 hover:text-violet-950 hover:underline"
-                            >
-                                Gérer le crédit
-                            </Link>
-                        </div>
-                    </div>
-
-                    <dl class="mt-6 grid gap-4 rounded-lg border border-gray-200 bg-gray-50/60 p-4 sm:grid-cols-2">
-                        <div>
-                            <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
-                                Installation
-                            </dt>
-                            <dd class="mt-1 text-sm font-medium text-gray-900">
-                                {{ installationStatusShortLabel(installation.status) }}
-                            </dd>
-                        </div>
-
-                        <div>
-                            <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
-                                Abonnement
-                            </dt>
-                            <dd class="mt-1 text-sm font-medium text-gray-900">
-                                <template v-if="lastSubscription">
-                                    {{ subscriptionStatusShortLabel(lastSubscription.status) }}
-                                </template>
-                                <template v-else>
-                                    —
-                                </template>
-                            </dd>
-                        </div>
-                    </dl>
-
-                    <template v-if="lastSubscription">
-                        <dl class="mt-6 grid gap-6 sm:grid-cols-2">
-                            <div>
-                                <dt class="text-sm font-medium text-gray-500">
-                                    Statut
-                                </dt>
-                                <dd class="mt-1">
-                                    <span
-                                        class="inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset"
-                                        :class="subscriptionStatusBadgeClass(lastSubscription.status)"
-                                    >
-                                        {{ subscriptionStatusLabel(lastSubscription.status) }}
-                                    </span>
-                                </dd>
-                            </div>
-
-                            <div>
-                                <dt class="text-sm font-medium text-gray-500">
-                                    Montant mensuel
-                                </dt>
-                                <dd class="mt-1 text-sm text-gray-900">
-                                    {{ formatMoney(lastSubscription.amount, lastSubscription.currency) }}
-                                </dd>
-                            </div>
-
-                            <div class="sm:col-span-2">
-                                <dt class="text-sm font-medium text-gray-500">
-                                    Période actuelle
-                                </dt>
-                                <dd class="mt-1 text-sm text-gray-900">
-                                    {{ formatPeriodRange(lastSubscription.current_period_start, lastSubscription.current_period_end) }}
-                                </dd>
-                            </div>
-
-                            <div>
-                                <dt class="text-sm font-medium text-gray-500">
-                                    Début de période
-                                </dt>
-                                <dd class="mt-1 text-sm text-gray-900">
-                                    {{ formatDateTime(lastSubscription.current_period_start) }}
-                                </dd>
-                            </div>
-
-                            <div>
-                                <dt class="text-sm font-medium text-gray-500">
-                                    Fin de période
-                                </dt>
-                                <dd class="mt-1 text-sm text-gray-900">
-                                    {{ formatDateTime(lastSubscription.current_period_end) }}
-                                </dd>
-                            </div>
-
-                            <div v-if="lastSubscription.grace_period_ends_at">
-                                <dt class="text-sm font-medium text-gray-500">
-                                    Fin de grâce
-                                </dt>
-                                <dd class="mt-1 text-sm text-gray-900">
-                                    {{ formatDateTime(lastSubscription.grace_period_ends_at) }}
-                                </dd>
-                            </div>
-                        </dl>
-                    </template>
-
-                    <p
-                        v-else
-                        class="mt-6 text-sm text-gray-700"
+                    <Link
+                        :href="current_subscription.show_url ?? navigation.subscription_show ?? `/subscriptions/${current_subscription.id}`"
+                        class="mt-4 inline-block text-sm font-medium text-gray-700 underline-offset-2 hover:underline"
                     >
-                        Aucun abonnement actif
-                    </p>
-                </section>
-
-                <section class="rounded-xl border-2 border-dashed border-gray-200 bg-gray-50/50 p-6 sm:p-8">
-                    <h2 class="text-lg font-semibold text-gray-900">
-                        Accès selon l’abonnement
-                    </h2>
-
-                    <p class="mt-1 text-sm text-gray-500">
-                        Résultat calculé côté serveur — indépendant du statut administratif de l’installation.
-                    </p>
-
-                    <div class="mt-6">
-                        <span
-                            class="inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium"
-                            :class="accessBadgeClass(access)"
-                        >
-                            {{ accessPrimaryLabel(access) }}
-                        </span>
-
-                        <p
-                            v-if="accessDetailLabel(access)"
-                            class="mt-3 text-sm text-gray-700"
-                        >
-                            {{ accessDetailLabel(access) }}
-                        </p>
-                    </div>
-                </section>
-
-                <section
-                    v-if="lastSubscription"
-                    class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-emerald-100 sm:p-8"
+                        Voir l'abonnement
+                    </Link>
+                </template>
+                <p
+                    v-else
+                    class="mt-4 text-sm text-gray-600"
                 >
-                    <h2 class="text-lg font-semibold text-gray-900">
-                        Crédit disponible
-                    </h2>
+                    Aucun abonnement actif
+                </p>
+            </section>
 
-                    <p class="mt-1 text-sm text-gray-500">
-                        Synthèse fournie par le serveur pour l’abonnement actuel.
-                    </p>
-
-                    <template v-if="credit && creditMonthsHeadline(credit.available_months)">
-                        <p class="mt-6 text-2xl font-semibold text-gray-900">
-                            {{ creditMonthsHeadline(credit.available_months) }}
-                        </p>
-
-                        <p
-                            v-if="paymentsCountLabel(credit.payment_count)"
-                            class="mt-1 text-sm text-gray-600"
-                        >
-                            {{ paymentsCountLabel(credit.payment_count) }}
-                        </p>
-                    </template>
-
-                    <p
-                        v-else
-                        class="mt-6 text-sm text-gray-700"
-                    >
-                        Aucun crédit disponible
-                    </p>
-
-                    <div
-                        v-if="lastSubscription?.id"
-                        class="mt-4"
-                    >
-                        <Link
-                            :href="`/subscriptions/${lastSubscription.id}`"
-                            class="text-sm font-medium text-gray-700 underline-offset-2 hover:text-gray-900 hover:underline"
-                        >
-                            Voir l’abonnement
-                        </Link>
-                    </div>
-                </section>
-
-                <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">
+            <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">
+                <div class="flex flex-wrap items-center justify-between gap-2">
                     <h2 class="text-lg font-semibold text-gray-900">
                         Paiements
                     </h2>
-
-                    <p class="mt-1 text-sm text-gray-500">
-                        Résumé des paiements liés à l’abonnement ou à l’historique de cette installation.
-                    </p>
-
-                    <dl class="mt-6 grid gap-6 sm:grid-cols-2">
-                        <div>
-                            <dt class="text-sm font-medium text-gray-500">
-                                Nombre de paiements
-                            </dt>
-                            <dd class="mt-1 text-sm font-medium text-gray-900">
-                                {{ paymentsSummary?.count ?? 0 }}
-                            </dd>
-                        </div>
-
-                        <div>
-                            <dt class="text-sm font-medium text-gray-500">
-                                Dernier paiement
-                            </dt>
-                            <dd class="mt-1 text-sm text-gray-900">
-                                <template v-if="paymentsSummary?.last_payment">
-                                    {{ formatMoney(paymentsSummary.last_payment.amount, paymentsSummary.last_payment.currency) }}
-                                    — {{ formatDateOnly(paymentsSummary.last_payment.paid_at) }}
-                                </template>
-                                <template v-else>
-                                    —
-                                </template>
-                            </dd>
-                        </div>
-                    </dl>
-
-                    <div class="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
-                        <Link
-                            href="/payments"
-                            class="text-sm font-medium text-gray-700 underline-offset-2 hover:text-gray-900 hover:underline"
-                        >
-                            Voir les paiements
-                        </Link>
-
-                        <Link
-                            v-if="paymentsSummary?.last_payment?.id"
-                            :href="`/payments/${paymentsSummary.last_payment.id}`"
-                            class="text-sm font-medium text-gray-700 underline-offset-2 hover:text-gray-900 hover:underline"
-                        >
-                            Voir le dernier paiement
-                        </Link>
-                    </div>
-                </section>
-
-                <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">
-                    <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                        <div>
-                            <h2 class="text-lg font-semibold text-gray-900">
-                                Modules
-                            </h2>
-
-                            <p class="mt-1 text-sm text-gray-500">
-                                Modules affectés à cette installation.
-                            </p>
-                        </div>
-
-                        <Link
-                            href="/installation-modules"
-                            class="inline-flex shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2"
-                        >
-                            Gérer les modules
-                        </Link>
-                    </div>
-
-                    <div
-                        v-if="!modules.length"
-                        class="mt-6 text-sm text-gray-700"
-                    >
-                        Aucun module affecté à cette installation.
-                    </div>
-
-                    <ul
-                        v-else
-                        class="mt-6 space-y-4"
-                    >
-                        <li
-                            v-for="assignment in modules"
-                            :key="assignment.id"
-                            class="rounded-lg border border-gray-200 bg-gray-50/50 p-4"
-                        >
-                            <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                                <div>
-                                    <p class="text-sm font-semibold text-gray-900">
-                                        {{ displayValue(assignment.module?.name) }}
-                                    </p>
-
-                                    <p
-                                        v-if="assignment.version || assignment.module?.price != null"
-                                        class="mt-1 text-sm text-gray-600"
-                                    >
-                                        <span v-if="assignment.version">
-                                            Version {{ assignment.version }}
-                                        </span>
-                                        <span
-                                            v-if="assignment.version && assignment.module?.price != null"
-                                            class="mx-1"
-                                        >
-                                            ·
-                                        </span>
-                                        <span v-if="assignment.module?.price != null">
-                                            {{ formatMoney(assignment.module.price, assignment.module.currency) }}
-                                        </span>
-                                    </p>
-                                </div>
-
-                                <span
-                                    class="inline-flex shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset"
-                                    :class="moduleAssignmentStatusBadgeClass(assignment.status)"
-                                >
-                                    {{ moduleAssignmentStatusLabel(assignment.status) }}
-                                </span>
-                            </div>
-
-                            <Link
-                                :href="`/installation-modules/${assignment.id}`"
-                                class="mt-3 inline-block text-sm font-medium text-gray-700 underline-offset-2 hover:text-gray-900 hover:underline"
-                            >
-                                Voir l’affectation
-                            </Link>
-                        </li>
-                    </ul>
-                </section>
-
-                <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">
-                    <h2 class="text-lg font-semibold text-gray-900">
-                        Base de données
-                    </h2>
-
-                    <p class="mt-1 text-sm text-amber-800/90">
-                        Référence uniquement — le Control Center ne se connecte pas actuellement à cette base.
-                    </p>
-
-                    <dl class="mt-6 grid gap-6 sm:grid-cols-2">
-                        <div>
-                            <dt class="text-sm font-medium text-gray-500">
-                                Nom de la base de données
-                            </dt>
-                            <dd class="mt-1 text-sm text-gray-900">
-                                {{ displayValue(installation.database_name) }}
-                            </dd>
-                        </div>
-
-                        <div>
-                            <dt class="text-sm font-medium text-gray-500">
-                                Hôte de la base de données
-                            </dt>
-                            <dd class="mt-1 text-sm text-gray-900">
-                                {{ displayValue(installation.database_host) }}
-                            </dd>
-                        </div>
-                    </dl>
-                </section>
-
-                <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">
-                    <h2 class="text-lg font-semibold text-gray-900">
-                        Activité
-                    </h2>
-
-                    <dl class="mt-6 grid gap-6 sm:grid-cols-2">
-                        <div>
-                            <dt class="text-sm font-medium text-gray-500">
-                                Date d'installation
-                            </dt>
-                            <dd class="mt-1 text-sm text-gray-900">
-                                {{ formatDateTime(installation.installed_at) }}
-                            </dd>
-                        </div>
-
-                        <div>
-                            <dt class="text-sm font-medium text-gray-500">
-                                Dernière présence enregistrée
-                            </dt>
-                            <dd class="mt-1 text-sm text-gray-900">
-                                {{ formatDateTime(installation.last_seen_at) }}
-                                <span class="mt-1 block text-xs text-gray-500">Saisie manuelle actuellement</span>
-                            </dd>
-                        </div>
-
-                        <div>
-                            <dt class="text-sm font-medium text-gray-500">
-                                Date de suspension (installation)
-                            </dt>
-                            <dd class="mt-1 text-sm text-gray-900">
-                                {{ formatDateTime(installation.suspended_at) }}
-                            </dd>
-                        </div>
-
-                        <div>
-                            <dt class="text-sm font-medium text-gray-500">
-                                Date de terminaison (installation)
-                            </dt>
-                            <dd class="mt-1 text-sm text-gray-900">
-                                {{ formatDateTime(installation.terminated_at) }}
-                            </dd>
-                        </div>
-                    </dl>
-                </section>
-
-                <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">
-                    <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                        <div>
-                            <h2 class="text-lg font-semibold text-gray-900">
-                                Client
-                            </h2>
-
-                            <p class="mt-1 text-sm text-gray-500">
-                                Entreprise et contact associés à cette installation.
-                            </p>
-                        </div>
-
-                        <Link
-                            v-if="installation.client?.id"
-                            :href="`/clients/${installation.client.id}`"
-                            class="inline-flex shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2"
-                        >
-                            Voir le client
-                        </Link>
-                    </div>
-
-                    <dl class="mt-6 grid gap-6 sm:grid-cols-2">
-                        <div>
-                            <dt class="text-sm font-medium text-gray-500">
-                                Entreprise
-                            </dt>
-                            <dd class="mt-1 text-sm font-medium text-gray-900">
-                                {{ displayValue(installation.client?.company_name) }}
-                            </dd>
-                        </div>
-
-                        <div>
-                            <dt class="text-sm font-medium text-gray-500">
-                                Contact
-                            </dt>
-                            <dd class="mt-1 text-sm text-gray-900">
-                                {{ displayValue(installation.client?.contact_name) }}
-                            </dd>
-                        </div>
-
-                        <div>
-                            <dt class="text-sm font-medium text-gray-500">
-                                Téléphone
-                            </dt>
-                            <dd class="mt-1 text-sm text-gray-900">
-                                {{ displayValue(installation.client?.phone) }}
-                            </dd>
-                        </div>
-
-                        <div>
-                            <dt class="text-sm font-medium text-gray-500">
-                                Adresse e-mail
-                            </dt>
-                            <dd class="mt-1 break-all text-sm text-gray-900">
-                                {{ displayValue(installation.client?.email) }}
-                            </dd>
-                        </div>
-
-                        <div class="sm:col-span-2">
-                            <dt class="text-sm font-medium text-gray-500">
-                                Adresse
-                            </dt>
-                            <dd class="mt-1 whitespace-pre-line text-sm text-gray-900">
-                                {{ displayValue(installation.client?.address) }}
-                            </dd>
-                        </div>
-
-                        <div>
-                            <dt class="text-sm font-medium text-gray-500">
-                                Ville
-                            </dt>
-                            <dd class="mt-1 text-sm text-gray-900">
-                                {{ displayValue(installation.client?.city) }}
-                            </dd>
-                        </div>
-
-                        <div>
-                            <dt class="text-sm font-medium text-gray-500">
-                                Pays
-                            </dt>
-                            <dd class="mt-1 text-sm text-gray-900">
-                                {{ displayValue(installation.client?.country) }}
-                            </dd>
-                        </div>
-                    </dl>
-                </section>
-
-                <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">
-                    <h2 class="text-lg font-semibold text-gray-900">
-                        Dates système
-                    </h2>
-
-                    <dl class="mt-6 grid gap-6 sm:grid-cols-2">
-                        <div>
-                            <dt class="text-sm font-medium text-gray-500">
-                                Créée le
-                            </dt>
-                            <dd class="mt-1 text-sm text-gray-900">
-                                {{ formatDateTime(installation.created_at) }}
-                            </dd>
-                        </div>
-
-                        <div>
-                            <dt class="text-sm font-medium text-gray-500">
-                                Dernière modification
-                            </dt>
-                            <dd class="mt-1 text-sm text-gray-900">
-                                {{ formatDateTime(installation.updated_at) }}
-                            </dd>
-                        </div>
-                    </dl>
-                </section>
-
-                <div class="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
                     <Link
-                        href="/installations"
-                        class="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2"
+                        v-if="navigation.payments_index"
+                        :href="navigation.payments_index"
+                        class="text-sm font-medium text-gray-700 underline-offset-2 hover:underline"
                     >
-                        Retour à la liste
-                    </Link>
-
-                    <Link
-                        :href="`/installations/${installation.id}/edit`"
-                        class="inline-flex items-center justify-center rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-gray-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2"
-                    >
-                        Modifier l'installation
+                        Voir les paiements
                     </Link>
                 </div>
-            </div>
+                <div
+                    v-if="!payments.data.length"
+                    class="mt-4 text-sm text-gray-500"
+                >
+                    Aucun paiement enregistré pour cette installation.
+                </div>
+                <div
+                    v-else
+                    class="mt-6 overflow-x-auto"
+                >
+                    <table class="min-w-full divide-y divide-gray-200 text-left text-sm">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-4 py-3 font-semibold text-gray-700">
+                                    Réf.
+                                </th>
+                                <th class="px-4 py-3 font-semibold text-gray-700">
+                                    Montant
+                                </th>
+                                <th class="px-4 py-3 font-semibold text-gray-700">
+                                    Statut
+                                </th>
+                                <th class="hidden px-4 py-3 font-semibold text-gray-700 md:table-cell">
+                                    Échéance
+                                </th>
+                                <th class="hidden px-4 py-3 font-semibold text-gray-700 lg:table-cell">
+                                    Payé le
+                                </th>
+                                <th class="hidden px-4 py-3 font-semibold text-gray-700 lg:table-cell">
+                                    Crédit (mois)
+                                </th>
+                                <th class="px-4 py-3 font-semibold text-gray-700">
+                                    Créé le
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-100">
+                            <tr
+                                v-for="payment in payments.data"
+                                :key="payment.id"
+                            >
+                                <td class="px-4 py-3 font-medium text-gray-900">
+                                    {{ displayValue(payment.reference ?? `#${payment.id}`) }}
+                                </td>
+                                <td class="whitespace-nowrap px-4 py-3 text-gray-900">
+                                    {{ formatAmount(payment.amount, payment.currency) }}
+                                </td>
+                                <td class="px-4 py-3">
+                                    <span
+                                        class="inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset"
+                                        :class="paymentStatusBadgeClass(payment.status)"
+                                    >
+                                        {{ paymentStatusLabel(payment.status) }}
+                                    </span>
+                                </td>
+                                <td class="hidden whitespace-nowrap px-4 py-3 text-gray-600 md:table-cell">
+                                    {{ formatDateTime(payment.due_at) }}
+                                </td>
+                                <td class="hidden whitespace-nowrap px-4 py-3 text-gray-600 lg:table-cell">
+                                    {{ formatDateTime(payment.paid_at) }}
+                                </td>
+                                <td class="hidden px-4 py-3 text-gray-600 lg:table-cell">
+                                    {{ payment.credit_months_purchased ?? '—' }}
+                                </td>
+                                <td class="whitespace-nowrap px-4 py-3 text-gray-600">
+                                    {{ formatDateTime(payment.created_at) }}
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div
+                    v-if="payments.links && payments.links.length > 3"
+                    class="mt-4 flex flex-wrap justify-center gap-1"
+                >
+                    <button
+                        v-for="(link, index) in payments.links"
+                        :key="`pay-${index}`"
+                        type="button"
+                        class="rounded-lg px-3 py-1.5 text-sm disabled:text-gray-400"
+                        :class="link.active ? 'bg-gray-900 text-white' : 'text-gray-700 hover:bg-gray-100'"
+                        :disabled="!link.url"
+                        @click="visitPagination(link.url)"
+                        v-html="link.label"
+                    />
+                </div>
+            </section>
+
+            <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                    <h2 class="text-lg font-semibold text-gray-900">
+                        Rappels d'abonnement
+                    </h2>
+                    <Link
+                        v-if="navigation.reminders_index"
+                        :href="navigation.reminders_index"
+                        class="text-sm font-medium text-gray-700 underline-offset-2 hover:underline"
+                    >
+                        Voir les rappels
+                    </Link>
+                </div>
+                <p class="mt-1 text-xs text-gray-500">
+                    Lecture seule — aucun envoi ni retraitement depuis cette page.
+                </p>
+                <div
+                    v-if="!reminders.data.length"
+                    class="mt-4 text-sm text-gray-500"
+                >
+                    Aucun rappel enregistré pour cette installation.
+                </div>
+                <div
+                    v-else
+                    class="mt-6 overflow-x-auto"
+                >
+                    <table class="min-w-full divide-y divide-gray-200 text-left text-sm">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-4 py-3 font-semibold text-gray-700">
+                                    Seuil
+                                </th>
+                                <th class="px-4 py-3 font-semibold text-gray-700">
+                                    Statut
+                                </th>
+                                <th class="px-4 py-3 font-semibold text-gray-700">
+                                    Planifié (UTC)
+                                </th>
+                                <th class="hidden px-4 py-3 font-semibold text-gray-700 md:table-cell">
+                                    Détecté
+                                </th>
+                                <th class="hidden px-4 py-3 font-semibold text-gray-700 md:table-cell">
+                                    Envoyé
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-100">
+                            <tr
+                                v-for="reminder in reminders.data"
+                                :key="reminder.id"
+                            >
+                                <td class="px-4 py-3 text-gray-900">
+                                    {{ thresholdLabel(reminder.threshold_days) }}
+                                </td>
+                                <td class="px-4 py-3">
+                                    <span
+                                        class="inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset"
+                                        :class="reminderStatusBadgeClass(reminder.status)"
+                                    >
+                                        {{ reminderStatusLabel(reminder.status) }}
+                                    </span>
+                                </td>
+                                <td class="whitespace-nowrap px-4 py-3 text-gray-600">
+                                    {{ formatPeriodEndUtc(reminder.scheduled_for) }}
+                                </td>
+                                <td class="hidden whitespace-nowrap px-4 py-3 text-gray-600 md:table-cell">
+                                    {{ formatDateTime(reminder.detected_at) }}
+                                </td>
+                                <td class="hidden whitespace-nowrap px-4 py-3 text-gray-600 md:table-cell">
+                                    {{ formatDateTime(reminder.sent_at) }}
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div
+                    v-if="reminders.links && reminders.links.length > 3"
+                    class="mt-4 flex flex-wrap justify-center gap-1"
+                >
+                    <button
+                        v-for="(link, index) in reminders.links"
+                        :key="`rem-${index}`"
+                        type="button"
+                        class="rounded-lg px-3 py-1.5 text-sm disabled:text-gray-400"
+                        :class="link.active ? 'bg-gray-900 text-white' : 'text-gray-700 hover:bg-gray-100'"
+                        :disabled="!link.url"
+                        @click="visitPagination(link.url)"
+                        v-html="link.label"
+                    />
+                </div>
+            </section>
         </div>
     </AdminLayout>
 </template>

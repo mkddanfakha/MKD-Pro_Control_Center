@@ -16,7 +16,7 @@ const form = useForm({
     email: props.client.email ?? '',
     address: props.client.address ?? '',
     city: props.client.city ?? '',
-    country: props.client.country ?? '',
+    country: props.client.country ?? 'Sénégal',
     status: props.client.status ?? 'active',
     notes: props.client.notes ?? '',
 });

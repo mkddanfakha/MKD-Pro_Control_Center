@@ -19,7 +19,7 @@ class InstallationAuditTest extends TestCase
 
     public function test_installation_creation_is_audited(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $client = $this->makeClient();
 
         $payload = [
@@ -52,7 +52,7 @@ class InstallationAuditTest extends TestCase
 
     public function test_installation_update_is_audited(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $client = $this->makeClient();
 
         $installation = Installation::query()->create([
@@ -94,7 +94,7 @@ class InstallationAuditTest extends TestCase
 
     public function test_installation_status_change_does_not_modify_subscription(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $client = $this->makeClient();
 
         $installation = Installation::query()->create([
@@ -134,7 +134,7 @@ class InstallationAuditTest extends TestCase
 
     public function test_destroy_installation_with_active_subscription_is_blocked_by_foreign_key(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $client = $this->makeClient();
 
         $installation = Installation::query()->create([
@@ -156,7 +156,7 @@ class InstallationAuditTest extends TestCase
 
     public function test_destroy_terminated_installation_with_active_subscription_is_blocked_by_foreign_key(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $client = $this->makeClient();
 
         $installation = Installation::query()->create([
@@ -178,7 +178,7 @@ class InstallationAuditTest extends TestCase
 
     public function test_destroy_terminated_installation_with_terminated_subscription_is_blocked_by_foreign_key(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $client = $this->makeClient();
 
         $installation = Installation::query()->create([
@@ -201,7 +201,7 @@ class InstallationAuditTest extends TestCase
 
     public function test_destroy_installation_with_multiple_subscriptions_is_blocked_by_foreign_key(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $client = $this->makeClient();
 
         $installation = Installation::query()->create([
@@ -235,7 +235,7 @@ class InstallationAuditTest extends TestCase
 
     public function test_destroy_installation_with_installation_module_is_blocked_by_foreign_key(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $client = $this->makeClient();
 
         $installation = Installation::query()->create([
@@ -265,7 +265,7 @@ class InstallationAuditTest extends TestCase
 
     public function test_destroy_terminated_installation_with_installation_module_is_blocked_by_foreign_key(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $client = $this->makeClient();
 
         $installation = Installation::query()->create([
@@ -293,7 +293,7 @@ class InstallationAuditTest extends TestCase
 
     public function test_destroy_installation_with_subscription_and_installation_module_is_blocked_by_foreign_key(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $client = $this->makeClient();
 
         $installation = Installation::query()->create([
@@ -328,7 +328,7 @@ class InstallationAuditTest extends TestCase
 
     public function test_installation_deletion_is_audited_without_polymorphic_reference(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $client = $this->makeClient();
 
         $installation = Installation::query()->create([
@@ -358,7 +358,7 @@ class InstallationAuditTest extends TestCase
 
     public function test_installation_index_and_show_do_not_create_audit_logs(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $client = $this->makeClient();
 
         $installation = Installation::query()->create([
@@ -411,14 +411,13 @@ class InstallationAuditTest extends TestCase
 
         $this->assertGreaterThan(0, $subscriptionCount);
 
-        $this->withoutExceptionHandling();
-
-        try {
-            $this->actingAs($user)->delete(route('installations.destroy', $installation));
-            $this->fail('Expected installation deletion to be blocked by subscriptions foreign key (QueryException).');
-        } catch (QueryException $exception) {
-            $this->assertNotSame('', trim($exception->getMessage()));
-        }
+        $this->actingAs($user)
+            ->delete(route('installations.destroy', $installation))
+            ->assertRedirect(route('installations.show', $installation))
+            ->assertSessionHas(
+                'error',
+                'Cette installation ne peut pas être supprimée car un abonnement lui est encore associé.',
+            );
 
         $this->assertDatabaseHas('installations', ['id' => $installationId]);
         $this->assertDatabaseHas('clients', ['id' => $clientId]);
@@ -452,14 +451,13 @@ class InstallationAuditTest extends TestCase
         $moduleId = $module->id;
         $installationModuleId = $installationModule->id;
 
-        $this->withoutExceptionHandling();
-
-        try {
-            $this->actingAs($user)->delete(route('installations.destroy', $installation));
-            $this->fail('Expected installation deletion to be blocked by installation_modules foreign key (QueryException).');
-        } catch (QueryException $exception) {
-            $this->assertNotSame('', trim($exception->getMessage()));
-        }
+        $this->actingAs($user)
+            ->delete(route('installations.destroy', $installation))
+            ->assertRedirect(route('installations.show', $installation))
+            ->assertSessionHas(
+                'error',
+                'Cette installation ne peut pas être supprimée car des modules lui sont encore associés.',
+            );
 
         $this->assertDatabaseHas('installations', ['id' => $installationId]);
         $this->assertDatabaseHas('clients', ['id' => $clientId]);
@@ -477,14 +475,13 @@ class InstallationAuditTest extends TestCase
     ): void {
         $installationId = $installation->id;
 
-        $this->withoutExceptionHandling();
-
-        try {
-            $this->actingAs($user)->delete(route('installations.destroy', $installation));
-            $this->fail('Expected installation deletion to be blocked by child foreign keys (QueryException).');
-        } catch (QueryException $exception) {
-            $this->assertNotSame('', trim($exception->getMessage()));
-        }
+        $this->actingAs($user)
+            ->delete(route('installations.destroy', $installation))
+            ->assertRedirect(route('installations.show', $installation))
+            ->assertSessionHas(
+                'error',
+                'Cette installation ne peut pas être supprimée car un abonnement lui est encore associé.',
+            );
 
         $this->assertDatabaseHas('installations', ['id' => $installationId]);
         $this->assertDatabaseHas('clients', ['id' => $client->id]);

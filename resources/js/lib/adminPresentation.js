@@ -106,3 +106,7 @@ export function paymentStatusBadgeClass(status) {
 
     return classes[status] ?? 'bg-gray-100 text-gray-600 ring-gray-200';
 }
+export const ADMIN_EMPTY_STATE_MESSAGES = {
+    clients: 'Aucun client ne correspond aux critères.',
+    installations: 'Aucune installation ne correspond aux critères.',
+};
