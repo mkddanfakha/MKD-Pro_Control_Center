@@ -15,7 +15,6 @@ return [
 
     'default_monthly_amount' => 15000,
 
-
     /*
     |--------------------------------------------------------------------------
     | Automatic credit renewal (preparation — Task 272)
@@ -33,12 +32,14 @@ return [
         // Commande : subscriptions:renew-with-credit (planifiée daily ; inactive tant que enabled=false).
     ],
 
-,
-
     /*
     |--------------------------------------------------------------------------
     | Subscription expiry reminders — detection only (Task 281)
     |--------------------------------------------------------------------------
+    |
+    | Read-only detection of upcoming current_period_end thresholds. No
+    | notifications, persistence, or scheduler until a future task enables them.
+    |
     */
 
     'subscription_reminders' => [
@@ -50,6 +51,11 @@ return [
     |--------------------------------------------------------------------------
     | Subscription reminder notifications — channel preparation (Task 284)
     |--------------------------------------------------------------------------
+    |
+    | Orchestrates composed reminder content through a configurable channel.
+    | Default channel "prepared" validates routing without external delivery.
+    | Does not update SubscriptionReminder status or sent_at.
+    |
     */
 
     'subscription_reminder_notifications' => [

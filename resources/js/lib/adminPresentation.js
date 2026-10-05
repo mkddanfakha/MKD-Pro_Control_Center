@@ -66,25 +66,28 @@ export function subscriptionStatusBadgeClass(status) {
     return classes[status] ?? 'bg-gray-100 text-gray-600 ring-gray-200';
 }
 
-export function reminderStatusLabel(status) {
+export function installationStatusLabel(status) {
     const labels = {
-        detected: 'Détecté',
-        sent: 'Envoyé',
-        failed: 'Échec d’envoi',
+        active: 'Active',
+        inactive: 'Inactive',
+        suspended: 'Suspendue',
+        terminated: 'Terminée',
     };
 
     return labels[status] ?? status;
 }
 
-export function reminderStatusBadgeClass(status) {
+export function installationStatusBadgeClass(status) {
     const classes = {
-        detected: 'bg-amber-50 text-amber-900 ring-amber-200',
-        sent: 'bg-emerald-50 text-emerald-800 ring-emerald-200',
-        failed: 'bg-red-50 text-red-800 ring-red-200',
+        active: 'bg-emerald-50 text-emerald-800 ring-emerald-200',
+        inactive: 'bg-gray-100 text-gray-700 ring-gray-300',
+        suspended: 'bg-orange-50 text-orange-900 ring-orange-200',
+        terminated: 'bg-gray-100 text-gray-700 ring-gray-300',
     };
 
     return classes[status] ?? 'bg-gray-100 text-gray-600 ring-gray-200';
 }
+
 export function paymentStatusLabel(status) {
     const labels = {
         pending: 'En attente',
@@ -106,13 +109,38 @@ export function paymentStatusBadgeClass(status) {
 
     return classes[status] ?? 'bg-gray-100 text-gray-600 ring-gray-200';
 }
+
+export function reminderStatusLabel(status) {
+    const labels = {
+        detected: 'Détecté',
+        sent: 'Envoyé',
+        failed: 'Échec d’envoi',
+    };
+
+    return labels[status] ?? status;
+}
+
+export function reminderStatusBadgeClass(status) {
+    const classes = {
+        detected: 'bg-amber-50 text-amber-900 ring-amber-200',
+        sent: 'bg-emerald-50 text-emerald-800 ring-emerald-200',
+        failed: 'bg-red-50 text-red-800 ring-red-200',
+    };
+
+    return classes[status] ?? 'bg-gray-100 text-gray-600 ring-gray-200';
+}
+
 export const ADMIN_EMPTY_STATE_MESSAGES = {
     clients: 'Aucun client ne correspond aux critères.',
     installations: 'Aucune installation ne correspond aux critères.',
+    subscriptions: 'Aucun abonnement ne correspond aux critères.',
+    payments: 'Aucun paiement ne correspond aux critères.',
+    reminders: 'Aucun rappel ne correspond aux critères.',
+    auditLogs: 'Aucun événement d’audit ne correspond aux critères.',
     modules: 'Aucun module enregistré.',
     installationModules: 'Aucune affectation de module pour le moment.',
-    auditLogs: 'Aucun événement d’audit ne correspond aux critères.',
 };
+
 export function moduleCatalogStatusLabel(status) {
     const labels = {
         active: 'Actif',
@@ -138,6 +166,7 @@ export function installationModuleStatusLabel(status) {
 export function installationModuleStatusBadgeClass(status) {
     return moduleCatalogStatusBadgeClass(status);
 }
+
 export function provisioningRunStatusLabel(status) {
     const labels = {
         pending: 'Demande en attente',
