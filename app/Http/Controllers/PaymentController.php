@@ -4,12 +4,15 @@ namespace App\Http\Controllers;
 
 use App\Exceptions\Subscription\SubscriptionRenewalException;
 use App\Exceptions\Subscription\SubscriptionServiceException;
+use App\Models\AuditLog;
 use App\Models\Payment;
 use App\Models\Subscription;
 use App\Models\SubscriptionPaymentConsumption;
 use App\Services\AuditLogService;
 use App\Services\SubscriptionService;
+use App\Support\AdminActionAvailability;
 use App\Support\OperationalActionAvailability;
+use App\Support\AuditLogAdminPresentation;
 use DateTimeInterface;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -25,7 +28,7 @@ class PaymentController extends Controller
         private readonly AuditLogService $auditLogService,
     ) {}
     /**
-     * Display a listing of the resource.
+     * Display a listing of the resource (consultation administrative read-only).
      */
     public function index(Request $request): Response
     {
@@ -39,36 +42,158 @@ class PaymentController extends Controller
                     Payment::STATUS_REFUNDED,
                 ]),
             ],
+            'payment_method' => 'nullable|string|max:100',
+            'client_id' => 'nullable|integer|exists:clients,id',
+            'installation_id' => 'nullable|integer|exists:installations,id',
+            'subscription_id' => 'nullable|integer|exists:subscriptions,id',
+            'search' => 'nullable|string|max:255',
+            'date_from' => 'nullable|date',
+            'date_to' => 'nullable|date|after_or_equal:date_from',
             'overdue' => ['nullable', Rule::in([1])],
         ]);
 
         $query = Payment::query()
+            ->select([
+                'payments.id',
+                'payments.subscription_id',
+                'payments.amount',
+                'payments.currency',
+                'payments.status',
+                'payments.due_at',
+                'payments.paid_at',
+                'payments.payment_method',
+                'payments.reference',
+                'payments.notes',
+                'payments.monthly_unit_amount',
+                'payments.credit_months_purchased',
+                'payments.credit_exhausted_at',
+                'payments.period_start',
+                'payments.period_end',
+                'payments.created_at',
+            ])
             ->with([
-                'subscription.installation.client',
+                'subscription' => fn ($subscriptionQuery) => $subscriptionQuery->select([
+                    'id',
+                    'installation_id',
+                    'status',
+                    'amount',
+                    'currency',
+                ]),
+                'subscription.installation' => fn ($installationQuery) => $installationQuery->select([
+                    'id',
+                    'client_id',
+                    'name',
+                    'subdomain',
+                ]),
+                'subscription.installation.client' => fn ($clientQuery) => $clientQuery->select([
+                    'id',
+                    'company_name',
+                ]),
             ])
             ->withCount('consumptions');
 
         if (filled($validated['status'] ?? null)) {
-            $query->where('status', $validated['status']);
+            $query->where('payments.status', $validated['status']);
+        }
+
+        if (filled($validated['payment_method'] ?? null)) {
+            $query->where('payments.payment_method', $validated['payment_method']);
+        }
+
+        if (filled($validated['subscription_id'] ?? null)) {
+            $query->where('payments.subscription_id', (int) $validated['subscription_id']);
+        }
+
+        if (filled($validated['installation_id'] ?? null)) {
+            $installationId = (int) $validated['installation_id'];
+            $query->whereHas('subscription', fn ($subscriptionQuery) => $subscriptionQuery->where('installation_id', $installationId));
+        }
+
+        if (filled($validated['client_id'] ?? null)) {
+            $clientId = (int) $validated['client_id'];
+            $query->whereHas('subscription.installation', fn ($installationQuery) => $installationQuery->where('client_id', $clientId));
+        }
+
+        if (filled($validated['search'] ?? null)) {
+            $search = $validated['search'];
+            $term = '%'.addcslashes($search, '%_\\').'%';
+            $query->where(function ($builder) use ($term, $search): void {
+                $builder
+                    ->where('payments.reference', 'like', $term)
+                    ->orWhereHas('subscription.installation', function ($installationQuery) use ($term): void {
+                        $installationQuery
+                            ->where('name', 'like', $term)
+                            ->orWhere('subdomain', 'like', $term)
+                            ->orWhereHas('client', fn ($clientQuery) => $clientQuery->where('company_name', 'like', $term));
+                    });
+
+                if (ctype_digit($search)) {
+                    $builder->orWhere('payments.id', (int) $search);
+                }
+            });
+        }
+
+        if (filled($validated['date_from'] ?? null) || filled($validated['date_to'] ?? null)) {
+            $dateFrom = $validated['date_from'] ?? null;
+            $dateTo = $validated['date_to'] ?? null;
+
+            $query->where(function ($dateQuery) use ($dateFrom, $dateTo): void {
+                $dateQuery->where(function ($paidQuery) use ($dateFrom, $dateTo): void {
+                    $paidQuery
+                        ->where('payments.status', Payment::STATUS_PAID)
+                        ->whereNotNull('payments.paid_at');
+
+                    if ($dateFrom !== null) {
+                        $paidQuery->where('payments.paid_at', '>=', $dateFrom.' 00:00:00');
+                    }
+
+                    if ($dateTo !== null) {
+                        $paidQuery->where('payments.paid_at', '<=', $dateTo.' 23:59:59');
+                    }
+                })->orWhere(function ($otherQuery) use ($dateFrom, $dateTo): void {
+                    $otherQuery->where('payments.status', '!=', Payment::STATUS_PAID);
+
+                    if ($dateFrom !== null) {
+                        $otherQuery->where('payments.created_at', '>=', $dateFrom.' 00:00:00');
+                    }
+
+                    if ($dateTo !== null) {
+                        $otherQuery->where('payments.created_at', '<=', $dateTo.' 23:59:59');
+                    }
+                });
+            });
         }
 
         if (filled($validated['overdue'] ?? null) && (int) $validated['overdue'] === 1) {
             $query
-                ->whereIn('status', [Payment::STATUS_PENDING, Payment::STATUS_FAILED])
-                ->whereNotNull('due_at')
-                ->where('due_at', '<', now());
+                ->whereIn('payments.status', [Payment::STATUS_PENDING, Payment::STATUS_FAILED])
+                ->whereNotNull('payments.due_at')
+                ->where('payments.due_at', '<', now());
         }
 
         $payments = $query
-            ->orderByDesc('id')
+            ->orderByDesc('payments.created_at')
+            ->orderByDesc('payments.id')
             ->paginate(15)
-            ->withQueryString();
+            ->withQueryString()
+            ->through(fn (Payment $payment): array => $this->serializePaymentForAdminIndex($payment));
 
-        return Inertia::render('Subscriptions/Payments/Index', [
+        return Inertia::render('Payments/Index', [
             'payments' => $payments,
+            'indicators' => $this->paymentAdminIndicators(),
             'filters' => [
                 'status' => $validated['status'] ?? null,
+                'payment_method' => $validated['payment_method'] ?? null,
+                'client_id' => isset($validated['client_id']) ? (int) $validated['client_id'] : null,
+                'installation_id' => isset($validated['installation_id']) ? (int) $validated['installation_id'] : null,
+                'subscription_id' => isset($validated['subscription_id']) ? (int) $validated['subscription_id'] : null,
+                'search' => $validated['search'] ?? null,
+                'date_from' => $validated['date_from'] ?? null,
+                'date_to' => $validated['date_to'] ?? null,
                 'overdue' => isset($validated['overdue']) ? (int) $validated['overdue'] : null,
+            ],
+            'admin_urls' => [
+                'create' => route('payments.create'),
             ],
         ]);
     }
@@ -109,9 +234,9 @@ class PaymentController extends Controller
     }
 
     /**
-     * Display the specified resource.
+     * Fiche administrative détaillée du paiement (lecture seule).
      */
-    public function show(Payment $payment): Response
+    public function show(Request $request, Payment $payment): Response
     {
         $payment->load([
             'subscription.installation.client',
@@ -119,19 +244,48 @@ class PaymentController extends Controller
         ]);
         $payment->loadCount('consumptions');
 
-        $paymentCredit = $this->paymentCreditForDisplay($payment);
+        $credit = $this->paymentCreditForDisplay($payment);
+        unset($credit['consumptions']);
 
-        $canRenewSubscription = $this->subscriptionService->canRenewFromPayment($payment);
+        $subscription = $payment->subscription;
+        $installation = $subscription?->installation;
+        $client = $installation?->client;
 
-        $payment->unsetRelation('consumptions');
-
-        return Inertia::render('Subscriptions/Payments/Show', [
-            'payment' => $payment,
-            'paymentCredit' => $paymentCredit,
-            'canRenewSubscription' => $canRenewSubscription,
-            'renewalPreview' => $canRenewSubscription
-                ? $this->subscriptionService->previewRenewalFromPayment($payment)
+        return Inertia::render('Payments/Show', [
+            'payment' => $this->serializePaymentForAdminShow($payment),
+            'credit' => $credit,
+            'consumptions' => $this->serializeConsumptionsForAdminShow($payment),
+            'subscription' => $subscription !== null
+                ? $this->serializeSubscriptionForPaymentAdminShow($subscription)
                 : null,
+            'installation' => $installation !== null
+                ? $this->serializeInstallationForPaymentAdminShow($installation)
+                : null,
+            'client' => $client !== null
+                ? $this->serializeClientForPaymentAdminShow($client)
+                : null,
+            'audit_history' => $this->paymentAuditHistoryForAdminShow($payment),
+            'navigation' => [
+                'payments_index' => route('payments.index'),
+                'subscription_show' => $subscription !== null
+                    ? route('subscriptions.show', $subscription)
+                    : null,
+                'installation_show' => $installation !== null
+                    ? route('installations.show', $installation)
+                    : null,
+                'client_show' => $client !== null
+                    ? route('clients.show', $client)
+                    : null,
+                'audit_logs_index' => route('audit-logs.index', [
+                    'auditable_type' => $payment->getMorphClass(),
+                    'auditable_id' => $payment->id,
+                ]),
+                'edit' => route('payments.edit', $payment),
+            ],
+            'admin_urls' => AdminActionAvailability::mergeIntoAdminUrls(
+                AdminActionAvailability::payment($payment),
+                ['edit' => route('payments.edit', $payment)],
+            ),
         ]);
     }
 
@@ -556,6 +710,247 @@ class PaymentController extends Controller
     }
 
     /**
+     * @return array{
+     *     total: int,
+     *     paid: int,
+     *     pending: int,
+     *     failed: int,
+     *     refunded: int,
+     *     total_paid_amount: int,
+     *     total_pending_amount: int,
+     *     total_refunded_amount: int,
+     * }
+     */
+    private function paymentAdminIndicators(): array
+    {
+        $row = Payment::query()
+            ->selectRaw('COUNT(*) as total')
+            ->selectRaw('SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as paid', [Payment::STATUS_PAID])
+            ->selectRaw('SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as pending', [Payment::STATUS_PENDING])
+            ->selectRaw('SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as failed', [Payment::STATUS_FAILED])
+            ->selectRaw('SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as refunded', [Payment::STATUS_REFUNDED])
+            ->selectRaw('SUM(CASE WHEN status = ? THEN amount ELSE 0 END) as total_paid_amount', [Payment::STATUS_PAID])
+            ->selectRaw('SUM(CASE WHEN status = ? THEN amount ELSE 0 END) as total_pending_amount', [Payment::STATUS_PENDING])
+            ->selectRaw('SUM(CASE WHEN status = ? THEN amount ELSE 0 END) as total_refunded_amount', [Payment::STATUS_REFUNDED])
+            ->first();
+
+        return [
+            'total' => (int) ($row->total ?? 0),
+            'paid' => (int) ($row->paid ?? 0),
+            'pending' => (int) ($row->pending ?? 0),
+            'failed' => (int) ($row->failed ?? 0),
+            'refunded' => (int) ($row->refunded ?? 0),
+            'total_paid_amount' => (int) ($row->total_paid_amount ?? 0),
+            'total_pending_amount' => (int) ($row->total_pending_amount ?? 0),
+            'total_refunded_amount' => (int) ($row->total_refunded_amount ?? 0),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function serializePaymentForAdminIndex(Payment $payment): array
+    {
+        $subscription = $payment->subscription;
+        $installation = $subscription?->installation;
+        $client = $installation?->client;
+
+        return [
+            'id' => $payment->id,
+            'amount' => (int) $payment->amount,
+            'currency' => (string) $payment->currency,
+            'status' => (string) $payment->status,
+            'due_at' => $this->formatAdminDateTime($payment->due_at),
+            'paid_at' => $this->formatAdminDateTime($payment->paid_at),
+            'payment_method' => $payment->payment_method,
+            'reference' => $payment->reference,
+            'notes' => $payment->notes,
+            'monthly_unit_amount' => $payment->monthly_unit_amount !== null
+                ? (int) $payment->monthly_unit_amount
+                : null,
+            'credit_months_purchased' => $payment->credit_months_purchased !== null
+                ? (int) $payment->credit_months_purchased
+                : null,
+            'credit_exhausted_at' => $this->formatAdminDateTime($payment->credit_exhausted_at),
+            'period_start' => $this->formatAdminDateTime($payment->period_start),
+            'period_end' => $this->formatAdminDateTime($payment->period_end),
+            'created_at' => $this->formatAdminDateTime($payment->created_at),
+            'consumptions_count' => (int) ($payment->consumptions_count ?? 0),
+            'subscription' => $subscription !== null ? [
+                'id' => $subscription->id,
+                'status' => (string) $subscription->status,
+                'amount' => (int) $subscription->amount,
+                'currency' => (string) $subscription->currency,
+            ] : null,
+            'installation' => $installation !== null ? [
+                'id' => $installation->id,
+                'name' => (string) $installation->name,
+                'subdomain' => (string) $installation->subdomain,
+            ] : null,
+            'client' => $client !== null ? [
+                'id' => $client->id,
+                'name' => (string) $client->company_name,
+                'show_url' => route('clients.show', $client),
+            ] : null,
+            'subscription_show_url' => $subscription !== null
+                ? route('subscriptions.show', $subscription)
+                : null,
+            'installation_show_url' => $installation !== null
+                ? route('installations.show', $installation)
+                : null,
+            'client_show_url' => $client !== null
+                ? route('clients.show', $client)
+                : null,
+            'show_url' => route('payments.show', $payment),
+            'edit_url' => route('payments.edit', $payment),
+            ...AdminActionAvailability::paymentFromConsumptionsCount((int) ($payment->consumptions_count ?? 0)),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function serializePaymentForAdminShow(Payment $payment): array
+    {
+        return [
+            'id' => $payment->id,
+            'subscription_id' => $payment->subscription_id,
+            'amount' => (int) $payment->amount,
+            'currency' => (string) $payment->currency,
+            'status' => (string) $payment->status,
+            'due_at' => $this->formatAdminDateTime($payment->due_at),
+            'paid_at' => $this->formatAdminDateTime($payment->paid_at),
+            'payment_method' => $payment->payment_method,
+            'reference' => $payment->reference,
+            'notes' => $payment->notes,
+            'period_start' => $this->formatAdminDateTime($payment->period_start),
+            'period_end' => $this->formatAdminDateTime($payment->period_end),
+            'renewal_applied_at' => $this->formatAdminDateTime($payment->renewal_applied_at),
+            'created_at' => $this->formatAdminDateTime($payment->created_at),
+            'updated_at' => $this->formatAdminDateTime($payment->updated_at),
+        ];
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function serializeConsumptionsForAdminShow(Payment $payment): array
+    {
+        return $payment->consumptions
+            ->map(fn (SubscriptionPaymentConsumption $consumption): array => [
+                'id' => $consumption->id,
+                'payment_id' => (int) $consumption->payment_id,
+                'subscription_id' => (int) $consumption->subscription_id,
+                'period_start' => $this->formatAdminDateTime($consumption->period_start),
+                'period_end' => $this->formatAdminDateTime($consumption->period_end),
+                'consumed_at' => $this->formatAdminDateTime($consumption->consumed_at),
+                'created_at' => $this->formatAdminDateTime($consumption->created_at),
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function serializeSubscriptionForPaymentAdminShow(Subscription $subscription): array
+    {
+        return [
+            'id' => $subscription->id,
+            'status' => (string) $subscription->status,
+            'amount' => (int) $subscription->amount,
+            'currency' => (string) $subscription->currency,
+            'starts_at' => $this->formatAdminDateTime($subscription->starts_at),
+            'current_period_start' => $this->formatAdminDateTime($subscription->current_period_start),
+            'current_period_end' => $this->formatAdminDateTime($subscription->current_period_end),
+            'grace_period_ends_at' => $this->formatAdminDateTime($subscription->grace_period_ends_at),
+            'suspended_at' => $this->formatAdminDateTime($subscription->suspended_at),
+            'terminated_at' => $this->formatAdminDateTime($subscription->terminated_at),
+            'show_url' => route('subscriptions.show', $subscription),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function serializeInstallationForPaymentAdminShow(\App\Models\Installation $installation): array
+    {
+        return [
+            'id' => $installation->id,
+            'name' => (string) $installation->name,
+            'subdomain' => (string) $installation->subdomain,
+            'domain' => $installation->domain,
+            'status' => (string) $installation->status,
+            'version' => $installation->version,
+            'show_url' => route('installations.show', $installation),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function serializeClientForPaymentAdminShow(\App\Models\Client $client): array
+    {
+        return [
+            'id' => $client->id,
+            'company_name' => (string) $client->company_name,
+            'contact_name' => (string) $client->contact_name,
+            'email' => $client->email,
+            'phone' => $client->phone,
+            'status' => (string) $client->status,
+            'show_url' => route('clients.show', $client),
+        ];
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function paymentAuditHistoryForAdminShow(Payment $payment): array
+    {
+        $actions = [
+            'payment.created',
+            'payment.updated',
+            'payment.deleted',
+            'payment.renewal_applied',
+            'payment.renewal_failed',
+        ];
+
+        $paymentMorph = $payment->getMorphClass();
+
+        $logs = AuditLog::query()
+            ->with('user')
+            ->where('auditable_type', $paymentMorph)
+            ->where('auditable_id', $payment->id)
+            ->whereIn('action', $actions)
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->limit(50)
+            ->get();
+
+        if ($logs->isEmpty()) {
+            return [];
+        }
+
+        $subjectContext = AuditLogAdminPresentation::buildSubjectContext($logs);
+
+        return $logs
+            ->map(
+                fn (AuditLog $log): array => AuditLogAdminPresentation::serializeEntry($log, $subjectContext),
+            )
+            ->values()
+            ->all();
+    }
+
+    private function formatAdminDateTime(mixed $value): ?string
+    {
+        if ($value instanceof DateTimeInterface) {
+            return $value->format('Y-m-d H:i:s');
+        }
+
+        return null;
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function validationRules(): array
@@ -566,6 +961,8 @@ class PaymentController extends Controller
             'currency' => 'required|string|size:3',
             'monthly_unit_amount' => 'prohibited',
             'credit_months_purchased' => 'prohibited',
+            'credit_exhausted_at' => 'prohibited',
+            'renewal_applied_at' => 'prohibited',
             'status' => 'required|in:pending,paid,failed,refunded',
             'due_at' => 'nullable|date',
             'paid_at' => [

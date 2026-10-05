@@ -18,7 +18,7 @@ class PaymentIndexConsumptionCountTest extends TestCase
 
     public function test_index_exposes_zero_consumptions_count_for_payment_without_consumption(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription();
         $payment = $this->makePaidPayment($subscription);
 
@@ -26,14 +26,14 @@ class PaymentIndexConsumptionCountTest extends TestCase
             ->get(route('payments.index'))
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
-                ->component('Subscriptions/Payments/Index')
+                ->component('Payments/Index')
                 ->where('payments.data.0.id', $payment->id)
                 ->where('payments.data.0.consumptions_count', 0));
     }
 
     public function test_index_exposes_consumptions_count_of_one(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription();
         $payment = $this->makePaidPayment($subscription);
 
@@ -49,7 +49,7 @@ class PaymentIndexConsumptionCountTest extends TestCase
 
     public function test_index_exposes_consumptions_count_of_three(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription();
         $payment = $this->makePaidPayment($subscription, ['amount' => 45000, 'credit_months_purchased' => 3]);
 
@@ -71,7 +71,7 @@ class PaymentIndexConsumptionCountTest extends TestCase
 
     public function test_index_assigns_distinct_consumptions_counts_per_payment(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription();
 
         $paymentWithoutConsumption = $this->makePaidPayment($subscription, [
@@ -101,7 +101,7 @@ class PaymentIndexConsumptionCountTest extends TestCase
                 $paymentWithOneConsumption,
                 $paymentWithTwoConsumptions,
             ) {
-                $page->component('Subscriptions/Payments/Index')
+                $page->component('Payments/Index')
                     ->has('payments.data', 3);
 
                 $countsById = collect($page->toArray()['props']['payments']['data'])

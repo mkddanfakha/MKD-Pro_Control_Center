@@ -19,7 +19,7 @@ class PaymentShowCreditPropsTest extends TestCase
 
     public function test_show_exposes_one_month_credit_for_fifteen_thousand_payment(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription();
         $payment = $this->makePaidPayment($subscription, 15000, 1);
 
@@ -27,21 +27,21 @@ class PaymentShowCreditPropsTest extends TestCase
             ->get(route('payments.show', $payment))
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
-                ->component('Subscriptions/Payments/Show')
-                ->has('paymentCredit')
-                ->where('paymentCredit.amount', 15000)
-                ->where('paymentCredit.monthly_unit_amount', 15000)
-                ->where('paymentCredit.credit_months_purchased', 1)
-                ->where('paymentCredit.credit_months_remaining', 1)
-                ->where('paymentCredit.consumptions_count', 0)
-                ->where('paymentCredit.presents_consumable_credit', true)
-                ->where('paymentCredit.is_exhausted', false)
-                ->has('paymentCredit.consumptions', 0));
+                ->component('Payments/Show')
+                ->has('credit')
+                ->where('credit.amount', 15000)
+                ->where('credit.monthly_unit_amount', 15000)
+                ->where('credit.credit_months_purchased', 1)
+                ->where('credit.credit_months_remaining', 1)
+                ->where('credit.consumptions_count', 0)
+                ->where('credit.presents_consumable_credit', true)
+                ->where('credit.is_exhausted', false)
+                ->has('consumptions', 0));
     }
 
     public function test_show_exposes_six_month_credit_for_ninety_thousand_payment(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription();
         $payment = $this->makePaidPayment($subscription, 90000, 6);
 
@@ -49,14 +49,14 @@ class PaymentShowCreditPropsTest extends TestCase
             ->get(route('payments.show', $payment))
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
-                ->where('paymentCredit.credit_months_purchased', 6)
-                ->where('paymentCredit.credit_months_remaining', 6)
-                ->where('paymentCredit.consumptions_count', 0));
+                ->where('credit.credit_months_purchased', 6)
+                ->where('credit.credit_months_remaining', 6)
+                ->where('credit.consumptions_count', 0));
     }
 
     public function test_show_exposes_partial_consumption_counts(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription();
         $payment = $this->makePaidPayment($subscription, 90000, 6);
 
@@ -80,19 +80,19 @@ class PaymentShowCreditPropsTest extends TestCase
             ->get(route('payments.show', $payment))
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
-                ->where('paymentCredit.credit_months_purchased', 6)
-                ->where('paymentCredit.consumptions_count', 2)
-                ->where('paymentCredit.credit_months_remaining', 4)
-                ->where('paymentCredit.presents_consumable_credit', true)
-                ->where('paymentCredit.is_exhausted', false)
-                ->has('paymentCredit.consumptions', 2)
-                ->where('paymentCredit.consumptions.0.period_start', '2026-10-01 00:00:00')
-                ->where('paymentCredit.consumptions.1.period_start', '2026-11-01 00:00:00'));
+                ->where('credit.credit_months_purchased', 6)
+                ->where('credit.consumptions_count', 2)
+                ->where('credit.credit_months_remaining', 4)
+                ->where('credit.presents_consumable_credit', true)
+                ->where('credit.is_exhausted', false)
+                ->has('consumptions', 2)
+                ->where('consumptions.0.period_start', '2026-10-01 00:00:00')
+                ->where('consumptions.1.period_start', '2026-11-01 00:00:00'));
     }
 
     public function test_show_marks_fully_consumed_credit_as_exhausted(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription();
         $payment = $this->makePaidPayment($subscription, 90000, 6, [
             'credit_exhausted_at' => '2026-12-01 12:00:00',
@@ -112,18 +112,17 @@ class PaymentShowCreditPropsTest extends TestCase
             ->get(route('payments.show', $payment))
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
-                ->where('paymentCredit.credit_months_remaining', 0)
-                ->where('paymentCredit.consumptions_count', 6)
-                ->where('paymentCredit.is_exhausted', true)
-                ->where('paymentCredit.presents_consumable_credit', false)
-                ->where('paymentCredit.credit_exhausted_at', '2026-12-01 12:00:00')
-                ->where('canRenewSubscription', false)
-                ->has('paymentCredit.consumptions', 6));
+                ->where('credit.credit_months_remaining', 0)
+                ->where('credit.consumptions_count', 6)
+                ->where('credit.is_exhausted', true)
+                ->where('credit.presents_consumable_credit', false)
+                ->where('credit.credit_exhausted_at', '2026-12-01 12:00:00')
+                ->has('consumptions', 6));
     }
 
     public function test_refunded_payment_keeps_history_but_not_consumable(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription();
         $payment = $this->makePaidPayment($subscription, 90000, 6, [
             'status' => Payment::STATUS_REFUNDED,
@@ -149,17 +148,16 @@ class PaymentShowCreditPropsTest extends TestCase
             ->get(route('payments.show', $payment))
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
-                ->where('paymentCredit.is_refunded', true)
-                ->where('paymentCredit.credit_months_purchased', 6)
-                ->where('paymentCredit.consumptions_count', 2)
-                ->where('paymentCredit.presents_consumable_credit', false)
-                ->where('canRenewSubscription', false)
-                ->has('paymentCredit.consumptions', 2));
+                ->where('credit.is_refunded', true)
+                ->where('credit.credit_months_purchased', 6)
+                ->where('credit.consumptions_count', 2)
+                ->where('credit.presents_consumable_credit', false)
+                ->has('consumptions', 2));
     }
 
     public function test_show_terminated_subscription_exposes_arithmetic_credit_but_not_renewable(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription([
             'status' => Subscription::STATUS_TERMINATED,
             'terminated_at' => '2026-10-01 00:00:00',
@@ -170,17 +168,17 @@ class PaymentShowCreditPropsTest extends TestCase
             ->get(route('payments.show', $payment))
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
-                ->component('Subscriptions/Payments/Show')
-                ->where('payment.subscription.status', Subscription::STATUS_TERMINATED)
-                ->where('paymentCredit.credit_months_purchased', 3)
-                ->where('paymentCredit.credit_months_remaining', 3)
-                ->where('paymentCredit.presents_consumable_credit', false)
-                ->where('canRenewSubscription', false));
+                ->component('Payments/Show')
+                ->where('subscription.status', Subscription::STATUS_TERMINATED)
+                ->where('credit.credit_months_purchased', 3)
+                ->where('credit.credit_months_remaining', 3)
+                ->where('credit.presents_consumable_credit', false)
+);
     }
 
     public function test_show_terminated_subscription_with_partially_consumed_payment_exposes_remaining_arithmetic_credit(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription([
             'current_period_start' => '2026-10-01 00:00:00',
             'current_period_end' => '2026-10-31 23:59:59',
@@ -208,11 +206,11 @@ class PaymentShowCreditPropsTest extends TestCase
             ->get(route('payments.show', $payment))
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
-                ->where('payment.subscription.status', Subscription::STATUS_TERMINATED)
-                ->where('paymentCredit.consumptions_count', 1)
-                ->where('paymentCredit.credit_months_remaining', 5)
-                ->where('paymentCredit.presents_consumable_credit', false)
-                ->where('canRenewSubscription', false));
+                ->where('subscription.status', Subscription::STATUS_TERMINATED)
+                ->where('credit.consumptions_count', 1)
+                ->where('credit.credit_months_remaining', 5)
+                ->where('credit.presents_consumable_credit', false)
+);
 
         $this->assertSame(
             $consumptionsBefore,
@@ -222,7 +220,7 @@ class PaymentShowCreditPropsTest extends TestCase
 
     public function test_show_terminated_refunded_payment_does_not_present_consumable_credit(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription([
             'status' => Subscription::STATUS_TERMINATED,
             'terminated_at' => '2026-10-01 00:00:00',
@@ -243,15 +241,15 @@ class PaymentShowCreditPropsTest extends TestCase
             ->get(route('payments.show', $payment))
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
-                ->where('paymentCredit.is_refunded', true)
-                ->where('paymentCredit.credit_months_remaining', 5)
-                ->where('paymentCredit.presents_consumable_credit', false)
-                ->where('canRenewSubscription', false));
+                ->where('credit.is_refunded', true)
+                ->where('credit.credit_months_remaining', 5)
+                ->where('credit.presents_consumable_credit', false)
+);
     }
 
     public function test_show_terminated_pending_payment_does_not_present_consumable_credit(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription([
             'status' => Subscription::STATUS_TERMINATED,
             'terminated_at' => '2026-10-01 00:00:00',
@@ -269,15 +267,15 @@ class PaymentShowCreditPropsTest extends TestCase
             ->get(route('payments.show', $payment))
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
-                ->where('payment.subscription.status', Subscription::STATUS_TERMINATED)
-                ->where('paymentCredit.credit_months_purchased', 3)
-                ->where('paymentCredit.presents_consumable_credit', false)
-                ->where('canRenewSubscription', false));
+                ->where('subscription.status', Subscription::STATUS_TERMINATED)
+                ->where('credit.credit_months_purchased', 3)
+                ->where('credit.presents_consumable_credit', false)
+);
     }
 
     public function test_pending_payment_does_not_present_consumable_credit(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription();
         $payment = Payment::query()->create([
             'subscription_id' => $subscription->id,
@@ -292,14 +290,14 @@ class PaymentShowCreditPropsTest extends TestCase
             ->get(route('payments.show', $payment))
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
-                ->where('paymentCredit.is_paid', false)
-                ->where('paymentCredit.presents_consumable_credit', false)
-                ->where('canRenewSubscription', false));
+                ->where('credit.is_paid', false)
+                ->where('credit.presents_consumable_credit', false)
+);
     }
 
     public function test_show_does_not_use_renewal_applied_at_for_consumption_count(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription();
         $payment = $this->makePaidPayment($subscription, 15000, 1, [
             'renewal_applied_at' => '2026-10-20 12:00:00',
@@ -309,13 +307,13 @@ class PaymentShowCreditPropsTest extends TestCase
             ->get(route('payments.show', $payment))
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
-                ->where('paymentCredit.consumptions_count', 0)
-                ->where('paymentCredit.credit_months_remaining', 1));
+                ->where('credit.consumptions_count', 0)
+                ->where('credit.credit_months_remaining', 1));
     }
 
     public function test_show_loads_consumptions_without_n_plus_one(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription();
         $payment = $this->makePaidPayment($subscription, 90000, 6);
 

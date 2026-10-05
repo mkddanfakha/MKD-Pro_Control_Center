@@ -32,7 +32,7 @@ class PaymentIndexFiltersTest extends TestCase
 
     public function test_index_without_filters_returns_all_payments(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription();
 
         Payment::query()->create([
@@ -54,15 +54,16 @@ class PaymentIndexFiltersTest extends TestCase
             ->get(route('payments.index'))
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
-                ->component('Subscriptions/Payments/Index')
+                ->component('Payments/Index')
                 ->has('payments.data', 2)
+                ->has('indicators')
                 ->where('filters.status', null)
                 ->where('filters.overdue', null));
     }
 
     public function test_index_filters_by_pending_status(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription();
         $pending = $this->makePayment($subscription, ['status' => Payment::STATUS_PENDING]);
         $this->makePayment($this->makeSubscription(), ['status' => Payment::STATUS_PAID, 'paid_at' => '2026-06-01 10:00:00']);
@@ -78,7 +79,7 @@ class PaymentIndexFiltersTest extends TestCase
 
     public function test_index_filters_by_paid_status(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription();
         $paid = $this->makePayment($subscription, [
             'status' => Payment::STATUS_PAID,
@@ -95,7 +96,7 @@ class PaymentIndexFiltersTest extends TestCase
 
     public function test_index_filters_by_failed_status(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription();
         $failed = $this->makePayment($subscription, ['status' => Payment::STATUS_FAILED]);
 
@@ -109,7 +110,7 @@ class PaymentIndexFiltersTest extends TestCase
 
     public function test_index_filters_by_refunded_status(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription();
         $refunded = $this->makePayment($subscription, [
             'status' => Payment::STATUS_REFUNDED,
@@ -126,7 +127,7 @@ class PaymentIndexFiltersTest extends TestCase
 
     public function test_index_rejects_invalid_status(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
 
         $this->actingAs($user)
             ->get(route('payments.index', ['status' => 'invalid']))
@@ -135,7 +136,7 @@ class PaymentIndexFiltersTest extends TestCase
 
     public function test_index_filters_overdue_payments(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription();
 
         $this->makePayment($subscription, [
@@ -163,7 +164,7 @@ class PaymentIndexFiltersTest extends TestCase
 
     public function test_paid_payment_with_past_due_at_is_not_overdue(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription();
 
         $this->makePayment($subscription, [
@@ -181,7 +182,7 @@ class PaymentIndexFiltersTest extends TestCase
 
     public function test_pending_payment_without_due_at_is_not_overdue(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription();
 
         $this->makePayment($subscription, [
@@ -198,7 +199,7 @@ class PaymentIndexFiltersTest extends TestCase
 
     public function test_pending_payment_with_future_due_at_is_not_overdue(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription();
 
         $this->makePayment($subscription, [
@@ -215,7 +216,7 @@ class PaymentIndexFiltersTest extends TestCase
 
     public function test_failed_payment_with_past_due_at_is_overdue(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription();
 
         $failed = $this->makePayment($subscription, [
@@ -233,7 +234,7 @@ class PaymentIndexFiltersTest extends TestCase
 
     public function test_refunded_payment_with_past_due_at_is_not_overdue(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription();
 
         $this->makePayment($subscription, [
@@ -251,7 +252,7 @@ class PaymentIndexFiltersTest extends TestCase
 
     public function test_index_applies_pending_and_overdue_filters_together(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription();
 
         $match = $this->makePayment($subscription, [
@@ -279,7 +280,7 @@ class PaymentIndexFiltersTest extends TestCase
 
     public function test_index_applies_failed_and_overdue_filters_together(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription();
 
         $match = $this->makePayment($subscription, [
@@ -305,7 +306,7 @@ class PaymentIndexFiltersTest extends TestCase
 
     public function test_paid_and_overdue_filters_return_no_payments(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription();
 
         $this->makePayment($subscription, [
@@ -326,7 +327,7 @@ class PaymentIndexFiltersTest extends TestCase
 
     public function test_index_exposes_validated_filters_in_inertia_props(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription();
         $this->makePayment($subscription, [
             'status' => Payment::STATUS_PENDING,
@@ -344,7 +345,7 @@ class PaymentIndexFiltersTest extends TestCase
 
     public function test_pagination_preserves_query_parameters(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
 
         for ($index = 0; $index < 16; $index++) {
             $subscription = $this->makeSubscription();
@@ -371,7 +372,7 @@ class PaymentIndexFiltersTest extends TestCase
 
     public function test_index_inertia_page_includes_filter_props_for_ui(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription();
         $this->makePayment($subscription, ['status' => Payment::STATUS_PENDING]);
 
@@ -379,7 +380,7 @@ class PaymentIndexFiltersTest extends TestCase
             ->get(route('payments.index', ['status' => Payment::STATUS_PENDING]))
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
-                ->component('Subscriptions/Payments/Index')
+                ->component('Payments/Index')
                 ->has('filters')
                 ->where('filters.status', Payment::STATUS_PENDING));
     }

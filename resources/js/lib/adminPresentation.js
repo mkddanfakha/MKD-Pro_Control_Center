@@ -85,3 +85,24 @@ export function reminderStatusBadgeClass(status) {
 
     return classes[status] ?? 'bg-gray-100 text-gray-600 ring-gray-200';
 }
+export function paymentStatusLabel(status) {
+    const labels = {
+        pending: 'En attente',
+        paid: 'Payé',
+        failed: 'Échoué',
+        refunded: 'Remboursé',
+    };
+
+    return labels[status] ?? status;
+}
+
+export function paymentStatusBadgeClass(status) {
+    const classes = {
+        pending: 'bg-amber-50 text-amber-900 ring-amber-200',
+        paid: 'bg-emerald-50 text-emerald-800 ring-emerald-200',
+        failed: 'bg-red-50 text-red-800 ring-red-200',
+        refunded: 'bg-gray-100 text-gray-700 ring-gray-300',
+    };
+
+    return classes[status] ?? 'bg-gray-100 text-gray-600 ring-gray-200';
+}
