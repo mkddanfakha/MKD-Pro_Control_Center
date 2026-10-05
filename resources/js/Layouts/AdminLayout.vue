@@ -9,11 +9,13 @@ const mobileMenuOpen = ref(false);
 const user = computed(() => page.props.auth?.user);
 
 function isNavItemActive(item) {
+    const path = page.url.split('?')[0];
+
     if (item.activePath) {
-        return page.url.split('?')[0] === item.activePath;
+        return path === item.activePath || path.startsWith(`${item.activePath}/`);
     }
 
-    return page.url === item.href;
+    return path === item.href || path.startsWith(`${item.href}/`);
 }
 
 const navigation = [
@@ -49,6 +51,21 @@ const navigation = [
         label: "Journal d'audit",
         href: '/audit-logs',
         activePath: '/audit-logs',
+    },
+    {
+        label: 'Produits commerciaux',
+        href: '/commercial/products',
+        activePath: '/commercial/products',
+    },
+    {
+        label: 'Offres commerciales',
+        href: '/commercial/offers',
+        activePath: '/commercial/offers',
+    },
+    {
+        label: 'Versions commerciales',
+        href: '/commercial/offer-versions',
+        activePath: '/commercial/offer-versions',
     },
 ];
 
@@ -169,6 +186,22 @@ const navigation = [
 
             <!-- Page content -->
             <main class="p-4 sm:p-6 lg:p-8">
+                <div
+                    v-if="page.flash?.success"
+                    class="mb-6 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm font-medium text-green-800"
+                    role="status"
+                >
+                    {{ page.flash.success }}
+                </div>
+
+                <div
+                    v-if="page.flash?.error"
+                    class="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-800"
+                    role="alert"
+                >
+                    {{ page.flash.error }}
+                </div>
+
                 <slot />
             </main>
         </div>

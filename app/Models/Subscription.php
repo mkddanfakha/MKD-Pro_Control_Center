@@ -2,10 +2,12 @@
 
 namespace App\Models;
 
+use App\Exceptions\Commercial\ImmutableCommercialRecordException;
 use App\Models\Payment;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Subscription extends Model
 {
@@ -19,6 +21,7 @@ class Subscription extends Model
 
     protected $fillable = [
         'installation_id',
+        'offer_version_id',
         'amount',
         'currency',
         'status',
@@ -46,9 +49,30 @@ class Subscription extends Model
         ];
     }
 
+    protected static function booted(): void
+    {
+        static::updating(function (Subscription $subscription): void {
+            if ($subscription->isDirty('offer_version_id')) {
+                throw new ImmutableCommercialRecordException(
+                    'La référence offer_version_id d’un abonnement ne peut pas être modifiée après création.',
+                );
+            }
+        });
+    }
+
     public function installation(): BelongsTo
     {
         return $this->belongsTo(Installation::class);
+    }
+
+    public function offerVersion(): BelongsTo
+    {
+        return $this->belongsTo(OfferVersion::class);
+    }
+
+    public function offerSnapshot(): HasOne
+    {
+        return $this->hasOne(SubscriptionOfferSnapshot::class);
     }
 
     public function payments(): HasMany

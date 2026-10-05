@@ -4,9 +4,12 @@ namespace App\Http\Controllers;
 
 use App\Exceptions\Subscription\SubscriptionServiceException;
 use App\Models\Installation;
+use App\Models\OfferVersion;
 use App\Models\Payment;
 use App\Models\Subscription;
+use App\Models\SubscriptionOfferSnapshot;
 use App\Services\AuditLogService;
+use App\Services\Commercial\CommercialSubscriptionService;
 use App\Services\SubscriptionService;
 use DateTimeInterface;
 use Illuminate\Database\UniqueConstraintViolationException;
@@ -31,6 +34,7 @@ class SubscriptionController extends Controller
 
     public function __construct(
         private readonly AuditLogService $auditLogService,
+        private readonly CommercialSubscriptionService $commercialSubscriptionService,
         private readonly SubscriptionService $subscriptionService,
     ) {}
 
@@ -94,7 +98,7 @@ class SubscriptionController extends Controller
 
         return Inertia::render('Subscriptions/Create', [
             'installations' => $installations,
-            'defaultMonthlyAmount' => (int) config('subscriptions.default_monthly_amount'),
+            'selectableOfferVersions' => $this->commercialSubscriptionService->selectableActiveOfferVersionsForForm(),
         ]);
     }
 
@@ -103,19 +107,36 @@ class SubscriptionController extends Controller
      */
     public function store(Request $request): RedirectResponse
     {
-        $request->merge([
-            'amount' => $request->filled('amount') ? $request->input('amount') : config('subscriptions.default_monthly_amount'),
-            'currency' => $request->filled('currency') ? $request->input('currency') : 'XOF',
-        ]);
-
         $validated = $request->validate($this->storeValidationRules());
 
+        $offerVersion = $this->commercialSubscriptionService->resolveOfferVersionForNewSubscription(
+            (int) $validated['offer_version_id'],
+        );
+
+        if ($validated['currency'] !== $offerVersion->currency) {
+            throw ValidationException::withMessages([
+                'currency' => 'La devise doit correspondre à celle de la version commerciale.',
+            ]);
+        }
+
+        if (! array_key_exists('amount', $validated) || $validated['amount'] === null) {
+            $validated['amount'] = (int) $offerVersion->price;
+        }
+
         try {
-            $subscription = DB::transaction(function () use ($validated) {
+            $subscription = DB::transaction(function () use ($validated, $offerVersion) {
                 $this->assertInstallationAllowsNewSubscription((int) $validated['installation_id']);
+
+                $lockedOfferVersion = OfferVersion::query()
+                    ->whereKey($offerVersion->id)
+                    ->lockForUpdate()
+                    ->firstOrFail();
+
+                $this->commercialSubscriptionService->resolveOfferVersionForNewSubscription($lockedOfferVersion->id);
 
                 $subscription = Subscription::create([
                     'installation_id' => $validated['installation_id'],
+                    'offer_version_id' => $lockedOfferVersion->id,
                     'amount' => $validated['amount'],
                     'currency' => $validated['currency'],
                     'status' => Subscription::STATUS_ACTIVE,
@@ -124,6 +145,14 @@ class SubscriptionController extends Controller
                 ]);
 
                 $subscription = $this->subscriptionService->createInitialPeriod($subscription);
+
+                SubscriptionOfferSnapshot::createFromOfferVersion(
+                    $subscription,
+                    $lockedOfferVersion,
+                    $validated['negotiated_rate_reason'] ?? null,
+                );
+
+                $subscription->load(['offerVersion.offer.product', 'offerSnapshot']);
 
                 $this->auditLogService->record(
                     'subscription.created',
@@ -149,10 +178,15 @@ class SubscriptionController extends Controller
      */
     public function show(Subscription $subscription): Response
     {
-        $subscription->load('installation.client');
+        $subscription->load([
+            'installation.client',
+            'offerSnapshot',
+            'offerVersion.offer.product',
+        ]);
 
         return Inertia::render('Subscriptions/Show', [
-            'subscription' => $subscription,
+            'subscription' => $this->serializeSubscriptionForAdminShow($subscription),
+            'commercial' => $this->serializeCommercialForSubscriptionShow($subscription),
             'credit' => $this->subscriptionService->summarizeSubscriptionCreditForDisplay($subscription),
         ]);
     }
@@ -238,21 +272,33 @@ class SubscriptionController extends Controller
      */
     public function update(Request $request, Subscription $subscription): RedirectResponse
     {
+        if ($request->has('offer_version_id')) {
+            throw ValidationException::withMessages([
+                'offer_version_id' => 'La référence commerciale historique de l’abonnement ne peut pas être modifiée.',
+            ]);
+        }
+
         $validated = $request->validate($this->updateValidationRules());
+
+        unset($validated['offer_version_id']);
 
         $this->assertUpdateBusinessRules($subscription, $validated);
 
         try {
             DB::transaction(function () use ($subscription, $validated) {
+                $subscription->loadMissing('offerSnapshot');
                 $oldValues = $this->subscriptionAuditSnapshot($subscription);
 
                 $subscription->update($validated);
 
+                $updatedSubscription = $subscription->fresh();
+                $updatedSubscription?->loadMissing('offerSnapshot');
+
                 $this->auditLogService->record(
                     'subscription.updated',
-                    auditable: $subscription,
+                    auditable: $updatedSubscription ?? $subscription,
                     oldValues: $oldValues,
-                    newValues: $this->subscriptionAuditSnapshot($subscription->fresh()),
+                    newValues: $this->subscriptionAuditSnapshot($updatedSubscription ?? $subscription),
                 );
             });
         } catch (UniqueConstraintViolationException) {
@@ -271,6 +317,18 @@ class SubscriptionController extends Controller
      */
     public function destroy(Subscription $subscription): RedirectResponse
     {
+        if ($subscription->offerSnapshot()->exists()) {
+            return redirect()
+                ->route('subscriptions.show', $subscription)
+                ->with('error', 'Cet abonnement ne peut pas être supprimé car un enregistrement commercial figé y est associé.');
+        }
+
+        if ($subscription->payments()->exists()) {
+            return redirect()
+                ->route('subscriptions.show', $subscription)
+                ->with('error', 'Cet abonnement ne peut pas être supprimé car des paiements lui sont encore associés.');
+        }
+
         $oldValues = $this->subscriptionAuditSnapshot($subscription);
 
         $subscription->delete();
@@ -294,6 +352,7 @@ class SubscriptionController extends Controller
 
         foreach ([
             'installation_id',
+            'offer_version_id',
             'amount',
             'currency',
             'status',
@@ -311,6 +370,21 @@ class SubscriptionController extends Controller
                 $snapshot[$attribute] = $value->format('Y-m-d H:i:s');
             } else {
                 $snapshot[$attribute] = $value;
+            }
+        }
+
+        if ($subscription->relationLoaded('offerSnapshot') && $subscription->offerSnapshot !== null) {
+            $commercialHistory = $subscription->offerSnapshot;
+            $snapshot['offer_version_code'] = $commercialHistory->offer_version_code;
+            $snapshot['offer_code'] = $commercialHistory->offer_code;
+            $snapshot['catalogue_price'] = (int) $commercialHistory->catalogue_price;
+            $snapshot['effective_price_at_subscription'] = (int) $commercialHistory->effective_price_at_subscription;
+        } elseif ($subscription->relationLoaded('offerVersion') && $subscription->offerVersion !== null) {
+            $snapshot['offer_version_code'] = $subscription->offerVersion->code;
+            $snapshot['catalogue_price'] = (int) $subscription->offerVersion->price;
+
+            if ($subscription->offerVersion->relationLoaded('offer') && $subscription->offerVersion->offer !== null) {
+                $snapshot['offer_code'] = $subscription->offerVersion->offer->code;
             }
         }
 
@@ -341,10 +415,12 @@ class SubscriptionController extends Controller
     {
         return [
             'installation_id' => 'required|integer|exists:installations,id',
-            'amount' => 'required|integer|min:0',
+            'offer_version_id' => 'required|integer|exists:offer_versions,id',
+            'amount' => 'nullable|integer|min:0',
             'currency' => 'required|string|size:3',
             'starts_at' => 'required|date',
             'notes' => 'nullable|string',
+            'negotiated_rate_reason' => 'nullable|string',
         ];
     }
 
@@ -398,5 +474,105 @@ class SubscriptionController extends Controller
             'terminated_at' => 'nullable|date',
             'notes' => 'nullable|string',
         ];
+    }
+
+    private function formatAdminDateTime(mixed $value): ?string
+    {
+        if ($value instanceof DateTimeInterface) {
+            return $value->format('Y-m-d H:i:s');
+        }
+
+        return null;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function serializeSubscriptionForAdminShow(Subscription $subscription): array
+    {
+        return [
+            'id' => $subscription->id,
+            'offer_version_id' => $subscription->offer_version_id,
+            'status' => (string) $subscription->status,
+            'amount' => (int) $subscription->amount,
+            'currency' => (string) $subscription->currency,
+            'starts_at' => $this->formatAdminDateTime($subscription->starts_at),
+            'current_period_start' => $this->formatAdminDateTime($subscription->current_period_start),
+            'current_period_end' => $this->formatAdminDateTime($subscription->current_period_end),
+            'grace_period_ends_at' => $this->formatAdminDateTime($subscription->grace_period_ends_at),
+            'suspended_at' => $this->formatAdminDateTime($subscription->suspended_at),
+            'terminated_at' => $this->formatAdminDateTime($subscription->terminated_at),
+            'notes' => $subscription->notes,
+            'created_at' => $this->formatAdminDateTime($subscription->created_at),
+            'updated_at' => $this->formatAdminDateTime($subscription->updated_at),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function serializeCommercialForSubscriptionShow(Subscription $subscription): array
+    {
+        $historyStatus = $this->resolveCommercialHistoryStatus($subscription);
+
+        $snapshot = null;
+        if ($subscription->offerSnapshot !== null) {
+            $snap = $subscription->offerSnapshot;
+            $snapshot = [
+                'offer_code' => $snap->offer_code,
+                'offer_version_code' => $snap->offer_version_code,
+                'product_code' => $snap->product_code,
+                'offer_name' => $snap->offer_name,
+                'catalogue_price' => (int) $snap->catalogue_price,
+                'effective_price_at_subscription' => (int) $snap->effective_price_at_subscription,
+                'currency' => (string) $snap->currency,
+                'billing_cycle' => $snap->billing_cycle,
+                'contract_reference' => $snap->contract_reference,
+                'negotiated_rate_reason' => $snap->negotiated_rate_reason,
+            ];
+        }
+
+        $offerVersion = null;
+        if ($subscription->offerVersion !== null) {
+            $version = $subscription->offerVersion;
+            $offer = $version->offer;
+            $offerVersion = [
+                'id' => $version->id,
+                'code' => (string) $version->code,
+                'version' => $version->version,
+                'price' => (int) $version->price,
+                'currency' => (string) $version->currency,
+                'billing_cycle' => $version->billing_cycle,
+                'status' => (string) $version->status,
+                'offer' => $offer !== null ? [
+                    'id' => $offer->id,
+                    'code' => (string) $offer->code,
+                    'name' => (string) $offer->name,
+                ] : null,
+            ];
+        }
+
+        return [
+            'history_status' => $historyStatus,
+            'legacy_unspecified' => $subscription->offer_version_id === null,
+            'offer_version' => $offerVersion,
+            'snapshot' => $snapshot,
+        ];
+    }
+
+    /**
+     * @return 'available'|'legacy_unavailable'|'missing_snapshot'
+     */
+    private function resolveCommercialHistoryStatus(Subscription $subscription): string
+    {
+        if ($subscription->offerSnapshot !== null) {
+            return 'available';
+        }
+
+        if ($subscription->offer_version_id === null) {
+            return 'legacy_unavailable';
+        }
+
+        return 'missing_snapshot';
     }
 }

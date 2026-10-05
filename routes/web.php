@@ -2,6 +2,9 @@
 
 use App\Http\Controllers\AuditLogController;
 use App\Http\Controllers\ClientController;
+use App\Http\Controllers\Commercial\OfferController as CommercialOfferController;
+use App\Http\Controllers\Commercial\OfferVersionController as CommercialOfferVersionController;
+use App\Http\Controllers\Commercial\ProductController as CommercialProductController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\InstallationController;
 use App\Http\Controllers\InstallationModuleController;
@@ -74,4 +77,14 @@ Route::middleware('auth')->group(function () {
     Route::get('payments/{payment}', [PaymentController::class, 'show'])
         ->middleware('can:accessControlCenter')
         ->name('payments.show');
+
+    Route::prefix('commercial')->name('commercial.')->middleware('can:accessControlCenter')->group(function () {
+        Route::resource('products', CommercialProductController::class)->except(['destroy']);
+        Route::resource('offers', CommercialOfferController::class)->except(['destroy']);
+        Route::post('offer-versions/{offer_version}/publish', [CommercialOfferVersionController::class, 'publish'])
+            ->name('offer-versions.publish');
+        Route::post('offer-versions/{offer_version}/retire', [CommercialOfferVersionController::class, 'retire'])
+            ->name('offer-versions.retire');
+        Route::resource('offer-versions', CommercialOfferVersionController::class)->except(['destroy']);
+    });
 });
