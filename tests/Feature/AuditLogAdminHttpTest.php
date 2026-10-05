@@ -117,7 +117,7 @@ class AuditLogAdminHttpTest extends TestCase
     public function test_filter_by_auditable_type(): void
     {
         $admin = $this->controlCenterAdminUser();
-        $user = $this->controlCenterAdminUser();
+        $user = User::factory()->create();
 
         $this->makeAuditLog([
             'action' => 'client.created',

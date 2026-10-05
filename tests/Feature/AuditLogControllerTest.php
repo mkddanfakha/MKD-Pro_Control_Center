@@ -130,7 +130,7 @@ class AuditLogControllerTest extends TestCase
     public function test_filter_by_user_id(): void
     {
         $admin = $this->controlCenterAdminUser();
-        $user = $this->controlCenterAdminUser();
+        $user = User::factory()->create();
         $other = User::factory()->create();
 
         $this->makeAuditLog(['action' => 'client.created', 'user_id' => $user->id]);
