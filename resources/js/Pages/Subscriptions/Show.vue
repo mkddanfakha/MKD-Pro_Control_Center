@@ -12,6 +12,10 @@ const props = defineProps({
         type: Object,
         required: true,
     },
+    commercial: {
+        type: Object,
+        required: true,
+    },
 });
 
 const page = usePage();
@@ -196,6 +200,41 @@ function installationStatusBadgeClass(status) {
     };
 
     return classes[status] ?? 'bg-gray-100 text-gray-600 ring-gray-200';
+}
+
+function billingCycleLabel(cycle) {
+    const labels = {
+        monthly: 'Mensuel',
+        yearly: 'Annuel',
+    };
+
+    return labels[cycle] ?? displayValue(cycle);
+}
+
+function offerVersionStatusLabel(status) {
+    const labels = {
+        draft: 'Brouillon',
+        active: 'Active',
+        retired: 'Retirée',
+    };
+
+    return labels[status] ?? displayValue(status);
+}
+
+function commercialHistoryMessage(commercial) {
+    if (commercial.legacy_unspecified) {
+        return 'Aucune offre commerciale associée';
+    }
+
+    if (commercial.history_status === 'missing_snapshot') {
+        return 'Version commerciale liée sans instantané catalogue enregistré';
+    }
+
+    if (commercial.history_status === 'available') {
+        return 'Instantané commercial disponible';
+    }
+
+    return 'Historique commercial';
 }
 
 const hasNotes = computed(() => {
@@ -404,6 +443,142 @@ function confirmConsumeNextCredit() {
                             </dd>
                         </div>
                     </dl>
+                </section>
+
+                <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">
+                    <h2 class="text-lg font-semibold text-gray-900">
+                        Offre commerciale
+                    </h2>
+                    <p class="mt-2 text-sm text-gray-600">
+                        {{ commercialHistoryMessage(commercial) }}
+                    </p>
+
+                    <template v-if="commercial.snapshot">
+                        <h3 class="mt-6 text-sm font-semibold text-gray-800">
+                            Instantané à la souscription
+                        </h3>
+                        <dl class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                            <div>
+                                <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                    Offre / code
+                                </dt>
+                                <dd class="mt-1 text-sm text-gray-900">
+                                    {{ displayValue(commercial.snapshot.offer_name) }}
+                                    ({{ displayValue(commercial.snapshot.offer_code) }})
+                                </dd>
+                            </div>
+                            <div>
+                                <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                    Version
+                                </dt>
+                                <dd class="mt-1 text-sm text-gray-900">
+                                    {{ displayValue(commercial.snapshot.offer_version_code) }}
+                                </dd>
+                            </div>
+                            <div>
+                                <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                    Produit
+                                </dt>
+                                <dd class="mt-1 text-sm text-gray-900">
+                                    {{ displayValue(commercial.snapshot.product_code) }}
+                                </dd>
+                            </div>
+                            <div>
+                                <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                    Prix catalogue
+                                </dt>
+                                <dd class="mt-1 text-sm text-gray-900">
+                                    {{ formatAmount(commercial.snapshot.catalogue_price, commercial.snapshot.currency) }}
+                                </dd>
+                            </div>
+                            <div>
+                                <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                    Cycle de facturation
+                                </dt>
+                                <dd class="mt-1 text-sm text-gray-900">
+                                    {{ billingCycleLabel(commercial.snapshot.billing_cycle) }}
+                                </dd>
+                            </div>
+                            <div>
+                                <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                    Tarif effectif à la souscription
+                                </dt>
+                                <dd class="mt-1 text-sm text-gray-900">
+                                    {{ formatAmount(commercial.snapshot.effective_price_at_subscription, commercial.snapshot.currency) }}
+                                </dd>
+                            </div>
+                            <div v-if="commercial.snapshot.contract_reference">
+                                <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                    Référence contrat
+                                </dt>
+                                <dd class="mt-1 text-sm text-gray-900">
+                                    {{ displayValue(commercial.snapshot.contract_reference) }}
+                                </dd>
+                            </div>
+                            <div v-if="commercial.snapshot.negotiated_rate_reason">
+                                <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                    Motif tarif négocié
+                                </dt>
+                                <dd class="mt-1 text-sm text-gray-900">
+                                    {{ displayValue(commercial.snapshot.negotiated_rate_reason) }}
+                                </dd>
+                            </div>
+                        </dl>
+                    </template>
+
+                    <template v-if="commercial.offer_version">
+                        <h3 class="mt-6 text-sm font-semibold text-gray-800">
+                            Version commerciale liée
+                        </h3>
+                        <dl class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                            <div>
+                                <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                    Offre
+                                </dt>
+                                <dd class="mt-1 text-sm text-gray-900">
+                                    <template v-if="commercial.offer_version.offer">
+                                        {{ commercial.offer_version.offer.name }}
+                                        ({{ commercial.offer_version.offer.code }})
+                                    </template>
+                                    <template v-else>
+                                        —
+                                    </template>
+                                </dd>
+                            </div>
+                            <div>
+                                <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                    Version / référence
+                                </dt>
+                                <dd class="mt-1 text-sm text-gray-900">
+                                    v{{ commercial.offer_version.version }} — {{ commercial.offer_version.code }}
+                                </dd>
+                            </div>
+                            <div>
+                                <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                    Prix catalogue (version)
+                                </dt>
+                                <dd class="mt-1 text-sm text-gray-900">
+                                    {{ formatAmount(commercial.offer_version.price, commercial.offer_version.currency) }}
+                                </dd>
+                            </div>
+                            <div>
+                                <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                    Cycle
+                                </dt>
+                                <dd class="mt-1 text-sm text-gray-900">
+                                    {{ billingCycleLabel(commercial.offer_version.billing_cycle) }}
+                                </dd>
+                            </div>
+                            <div>
+                                <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                    Statut version
+                                </dt>
+                                <dd class="mt-1 text-sm text-gray-900">
+                                    {{ offerVersionStatusLabel(commercial.offer_version.status) }}
+                                </dd>
+                            </div>
+                        </dl>
+                    </template>
                 </section>
 
                 <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">

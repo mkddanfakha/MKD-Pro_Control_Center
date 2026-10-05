@@ -18,7 +18,7 @@ class SubscriptionCreditPropsTest extends TestCase
 
     public function test_show_exposes_one_month_credit_for_single_paid_payment(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription();
         $payment = $this->makePaidPayment($subscription, 15000, 1);
 
@@ -42,7 +42,7 @@ class SubscriptionCreditPropsTest extends TestCase
 
     public function test_show_exposes_multi_month_credit_without_consumption(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription();
         $this->makePaidPayment($subscription, 45000, 3);
 
@@ -56,7 +56,7 @@ class SubscriptionCreditPropsTest extends TestCase
 
     public function test_show_reflects_partial_consumption(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription();
         $payment = $this->makePaidPayment($subscription, 45000, 3);
 
@@ -79,7 +79,7 @@ class SubscriptionCreditPropsTest extends TestCase
 
     public function test_show_sums_multiple_payments_in_fifo_order(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription();
 
         $paymentA = $this->makePaidPayment($subscription, 90000, 6, [
@@ -105,7 +105,7 @@ class SubscriptionCreditPropsTest extends TestCase
 
     public function test_show_sums_remaining_credit_for_partially_consumed_payments(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription();
 
         $paymentA = $this->makePaidPayment($subscription, 90000, 6, [
@@ -144,7 +144,7 @@ class SubscriptionCreditPropsTest extends TestCase
 
     public function test_show_excludes_refunded_payment_from_available_months(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription();
 
         $this->makePaidPayment($subscription, 45000, 3, [
@@ -162,7 +162,7 @@ class SubscriptionCreditPropsTest extends TestCase
 
     public function test_show_excludes_failed_and_pending_payments_from_available_months(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription();
 
         Payment::query()->create([
@@ -193,7 +193,7 @@ class SubscriptionCreditPropsTest extends TestCase
 
     public function test_show_reports_zero_when_credit_fully_consumed(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription();
         $payment = $this->makePaidPayment($subscription, 45000, 3);
 
@@ -218,7 +218,7 @@ class SubscriptionCreditPropsTest extends TestCase
 
     public function test_show_reports_zero_consumable_credit_for_terminated_subscription(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription([
             'status' => Subscription::STATUS_TERMINATED,
             'terminated_at' => now(),
@@ -236,7 +236,7 @@ class SubscriptionCreditPropsTest extends TestCase
 
     public function test_show_terminated_with_partially_consumed_payment_reports_zero_available_and_positive_per_payment_remaining(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription([
             'status' => Subscription::STATUS_TERMINATED,
             'terminated_at' => '2026-11-01 00:00:00',
@@ -264,7 +264,7 @@ class SubscriptionCreditPropsTest extends TestCase
 
     public function test_edit_exposes_zero_payments_and_no_pending(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription(['amount' => 18000]);
 
         $this->actingAs($user)
@@ -280,7 +280,7 @@ class SubscriptionCreditPropsTest extends TestCase
 
     public function test_edit_exposes_payment_count_when_payments_exist(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription();
         $this->makePaidPayment($subscription, 15000, 1);
 
@@ -295,7 +295,7 @@ class SubscriptionCreditPropsTest extends TestCase
 
     public function test_edit_exposes_available_credit_months(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription();
         $this->makePaidPayment($subscription, 45000, 3);
 
@@ -309,7 +309,7 @@ class SubscriptionCreditPropsTest extends TestCase
 
     public function test_edit_exposes_has_pending_payments_when_pending_exists(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription();
 
         Payment::query()->create([
@@ -331,7 +331,7 @@ class SubscriptionCreditPropsTest extends TestCase
 
     public function test_edit_has_pending_payments_false_when_only_paid_payments_exist(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription();
         $this->makePaidPayment($subscription, 15000, 1);
 
@@ -348,14 +348,14 @@ class SubscriptionCreditPropsTest extends TestCase
     private function makeSubscription(array $attributes = []): Subscription
     {
         $client = Client::query()->create([
-            'company_name' => 'Société props crédit',
+            'company_name' => 'Soci├®t├® props cr├®dit',
             'contact_name' => 'Contact',
             'status' => 'active',
         ]);
 
         $installation = Installation::query()->create([
             'client_id' => $client->id,
-            'name' => 'Installation props crédit',
+            'name' => 'Installation props cr├®dit',
             'subdomain' => 'credit-props-'.uniqid(),
             'status' => 'active',
         ]);

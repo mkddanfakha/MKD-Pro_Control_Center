@@ -490,7 +490,7 @@ class SubscriptionController extends Controller
      */
     private function serializeSubscriptionForAdminShow(Subscription $subscription): array
     {
-        return [
+        $payload = [
             'id' => $subscription->id,
             'offer_version_id' => $subscription->offer_version_id,
             'status' => (string) $subscription->status,
@@ -506,6 +506,27 @@ class SubscriptionController extends Controller
             'created_at' => $this->formatAdminDateTime($subscription->created_at),
             'updated_at' => $this->formatAdminDateTime($subscription->updated_at),
         ];
+
+        if ($subscription->relationLoaded('installation') && $subscription->installation !== null) {
+            $installation = $subscription->installation;
+            $client = $installation->relationLoaded('client') ? $installation->client : null;
+
+            $payload['installation'] = [
+                'id' => $installation->id,
+                'name' => $installation->name,
+                'subdomain' => $installation->subdomain,
+                'domain' => $installation->domain,
+                'version' => $installation->version,
+                'status' => $installation->status,
+                'client' => $client !== null ? [
+                    'id' => $client->id,
+                    'company_name' => $client->company_name,
+                    'contact_name' => $client->contact_name,
+                ] : null,
+            ];
+        }
+
+        return $payload;
     }
 
     /**
