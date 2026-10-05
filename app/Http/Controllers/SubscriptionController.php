@@ -10,6 +10,7 @@ use App\Models\Subscription;
 use App\Models\SubscriptionOfferSnapshot;
 use App\Services\AuditLogService;
 use App\Services\Commercial\CommercialSubscriptionService;
+use App\Services\ControlCenterDashboardStatisticsService;
 use App\Services\SubscriptionService;
 use App\Support\OperationalActionAvailability;
 use DateTimeInterface;
@@ -36,11 +37,12 @@ class SubscriptionController extends Controller
     public function __construct(
         private readonly AuditLogService $auditLogService,
         private readonly CommercialSubscriptionService $commercialSubscriptionService,
+        private readonly ControlCenterDashboardStatisticsService $dashboardStatisticsService,
         private readonly SubscriptionService $subscriptionService,
     ) {}
 
     /**
-     * Display a listing of the resource.
+     * Display a listing of the resource (consultation administrative read-only).
      */
     public function index(Request $request): Response
     {
@@ -54,35 +56,113 @@ class SubscriptionController extends Controller
                     Subscription::STATUS_TERMINATED,
                 ]),
             ],
+            'installation_status' => [
+                'nullable',
+                Rule::in(['active', 'inactive', 'suspended', 'terminated']),
+            ],
+            'client_id' => 'nullable|integer|exists:clients,id',
+            'installation_id' => 'nullable|integer|exists:installations,id',
+            'search' => 'nullable|string|max:255',
+            'period' => [
+                'nullable',
+                Rule::in(['future', 'due_7', 'due_3', 'due_1', 'due_0', 'expired']),
+            ],
             'expiring_within_days' => ['nullable', Rule::in([7])],
         ]);
 
         $query = Subscription::query()
-            ->with('installation.client');
+            ->select([
+                'subscriptions.id',
+                'subscriptions.installation_id',
+                'subscriptions.status',
+                'subscriptions.amount',
+                'subscriptions.currency',
+                'subscriptions.starts_at',
+                'subscriptions.current_period_start',
+                'subscriptions.current_period_end',
+                'subscriptions.grace_period_ends_at',
+                'subscriptions.suspended_at',
+                'subscriptions.terminated_at',
+            ])
+            ->with([
+                'installation' => fn ($installationQuery) => $installationQuery->select([
+                    'id',
+                    'client_id',
+                    'name',
+                    'subdomain',
+                    'domain',
+                    'status',
+                ]),
+                'installation.client:id,company_name',
+            ])
+            ->withExists(['offerSnapshot', 'payments']);
 
         if (filled($validated['status'] ?? null)) {
-            $query->where('status', $validated['status']);
+            $query->where('subscriptions.status', $validated['status']);
+        }
+
+        if (filled($validated['installation_id'] ?? null)) {
+            $query->where('subscriptions.installation_id', (int) $validated['installation_id']);
+        }
+
+        if (filled($validated['client_id'] ?? null)) {
+            $clientId = (int) $validated['client_id'];
+            $query->whereHas('installation', fn ($installationQuery) => $installationQuery->where('client_id', $clientId));
+        }
+
+        if (filled($validated['installation_status'] ?? null)) {
+            $installationStatus = $validated['installation_status'];
+            $query->whereHas('installation', fn ($installationQuery) => $installationQuery->where('status', $installationStatus));
+        }
+
+        if (filled($validated['search'] ?? null)) {
+            $term = '%'.addcslashes($validated['search'], '%_\\').'%';
+            $query->where(function ($builder) use ($term): void {
+                $builder
+                    ->whereHas('installation', function ($installationQuery) use ($term): void {
+                        $installationQuery
+                            ->where('name', 'like', $term)
+                            ->orWhere('subdomain', 'like', $term)
+                            ->orWhere('domain', 'like', $term)
+                            ->orWhereHas('client', fn ($clientQuery) => $clientQuery->where('company_name', 'like', $term));
+                    });
+            });
+        }
+
+        if (filled($validated['period'] ?? null)) {
+            $this->dashboardStatisticsService->applySubscriptionPeriodFilter($query, $validated['period']);
         }
 
         if (filled($validated['expiring_within_days'] ?? null)) {
             $query
-                ->where('status', Subscription::STATUS_ACTIVE)
-                ->whereNotNull('current_period_end')
-                ->whereBetween('current_period_end', [now(), now()->addDays(7)]);
+                ->where('subscriptions.status', Subscription::STATUS_ACTIVE)
+                ->whereNotNull('subscriptions.current_period_end')
+                ->whereBetween('subscriptions.current_period_end', [now(), now()->addDays(7)]);
         }
 
         $subscriptions = $query
-            ->orderByDesc('id')
+            ->orderBy('subscriptions.current_period_end')
+            ->orderBy('subscriptions.id')
             ->paginate(15)
-            ->withQueryString();
+            ->withQueryString()
+            ->through(fn (Subscription $subscription): array => $this->serializeSubscriptionForAdminIndex($subscription));
 
         return Inertia::render('Subscriptions/Index', [
             'subscriptions' => $subscriptions,
+            'indicators' => $this->dashboardStatisticsService->subscriptionAdminIndicators(),
             'filters' => [
                 'status' => $validated['status'] ?? null,
+                'installation_status' => $validated['installation_status'] ?? null,
+                'client_id' => isset($validated['client_id']) ? (int) $validated['client_id'] : null,
+                'installation_id' => isset($validated['installation_id']) ? (int) $validated['installation_id'] : null,
+                'search' => $validated['search'] ?? null,
+                'period' => $validated['period'] ?? null,
                 'expiring_within_days' => isset($validated['expiring_within_days'])
                     ? (int) $validated['expiring_within_days']
                     : null,
+            ],
+            'admin_urls' => [
+                'create' => route('subscriptions.create'),
             ],
         ]);
     }
@@ -476,6 +556,50 @@ class SubscriptionController extends Controller
             'suspended_at' => 'nullable|date',
             'terminated_at' => 'nullable|date',
             'notes' => 'nullable|string',
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function serializeSubscriptionForAdminIndex(Subscription $subscription): array
+    {
+        $installation = $subscription->installation;
+        $client = $installation?->client;
+
+        $calendarDays = $this->dashboardStatisticsService->calendarDaysUntilPeriodEnd(
+            $subscription->current_period_end,
+        );
+
+        return [
+            'id' => $subscription->id,
+            'status' => (string) $subscription->status,
+            'amount' => (int) $subscription->amount,
+            'currency' => (string) $subscription->currency,
+            'starts_at' => $this->formatAdminDateTime($subscription->starts_at),
+            'current_period_start' => $this->formatAdminDateTime($subscription->current_period_start),
+            'current_period_end' => $this->formatAdminDateTime($subscription->current_period_end),
+            'grace_period_ends_at' => $this->formatAdminDateTime($subscription->grace_period_ends_at),
+            'suspended_at' => $this->formatAdminDateTime($subscription->suspended_at),
+            'terminated_at' => $this->formatAdminDateTime($subscription->terminated_at),
+            'period_due_state' => $this->dashboardStatisticsService->resolvePeriodDueState($calendarDays),
+            'calendar_days_until_period_end' => $calendarDays,
+            'installation' => $installation !== null ? [
+                'id' => $installation->id,
+                'name' => (string) $installation->name,
+                'subdomain' => (string) $installation->subdomain,
+                'domain' => $installation->domain,
+                'status' => (string) $installation->status,
+            ] : null,
+            'client' => $client !== null ? [
+                'id' => $client->id,
+                'name' => (string) $client->company_name,
+            ] : null,
+            'show_url' => route('subscriptions.show', $subscription),
+            'installation_show_url' => $installation !== null
+                ? route('installations.show', $installation)
+                : null,
+            'edit_url' => route('subscriptions.edit', $subscription),
         ];
     }
 

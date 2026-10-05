@@ -1,6 +1,29 @@
 <script setup>
 import AdminLayout from '@/Layouts/AdminLayout.vue';
+import { appendQuery, useAdminUrls } from '@/lib/adminNavigation.js';
 import { Head, Link } from '@inertiajs/vue3';
+
+const adminUrls = useAdminUrls();
+
+function subscriptionsFilter(params) {
+    return appendQuery(adminUrls.subscriptions_index ?? '/subscriptions', params);
+}
+
+function paymentsFilter(params) {
+    return appendQuery(adminUrls.payments_index ?? '/payments', params);
+}
+
+function clientsFilter(params) {
+    return appendQuery(adminUrls.clients_index ?? '/clients', params);
+}
+
+function installationsFilter(params) {
+    return appendQuery(adminUrls.installations_index ?? '/installations', params);
+}
+
+function remindersFilter(params) {
+    return appendQuery(adminUrls.subscription_reminders_index ?? '/subscription-reminders', params);
+}
 
 defineProps({
     totalClients: {
@@ -20,6 +43,10 @@ defineProps({
         default: 0,
     },
     activeInstallations: {
+        type: Number,
+        default: 0,
+    },
+    inactiveInstallations: {
         type: Number,
         default: 0,
     },
@@ -87,6 +114,27 @@ defineProps({
         type: Array,
         default: () => [],
     },
+    subscriptionDueStats: {
+        type: Object,
+        default: () => ({
+            reference_date_utc: null,
+            future: 0,
+            due_in_seven_days: 0,
+            due_in_three_days: 0,
+            due_tomorrow: 0,
+            due_today: 0,
+            period_expired: 0,
+        }),
+    },
+    subscriptionReminderStats: {
+        type: Object,
+        default: () => ({
+            total: 0,
+            detected: 0,
+            sent: 0,
+            failed: 0,
+        }),
+    },
 });
 
 function formatCount(value) {
@@ -152,6 +200,12 @@ function activityBadgeClass(type) {
                 <p class="mt-1 text-sm text-gray-500">
                     Vue d’ensemble opérationnelle de votre écosystème MKD-Pro.
                 </p>
+                <p
+                    v-if="subscriptionDueStats.reference_date_utc"
+                    class="mt-1 text-xs text-gray-400"
+                >
+                    Échéances calculées au {{ subscriptionDueStats.reference_date_utc }} (UTC).
+                </p>
             </div>
 
             <!-- A. Vue générale -->
@@ -169,7 +223,7 @@ function activityBadgeClass(type) {
                             {{ formatCount(totalClients) }}
                         </p>
                         <Link
-                            href="/clients"
+                            :href="adminUrls.clients_index ?? '/clients'"
                             class="mt-3 inline-block text-sm font-medium text-gray-700 underline-offset-2 hover:text-gray-900 hover:underline"
                         >
                             Voir les clients
@@ -184,7 +238,7 @@ function activityBadgeClass(type) {
                             {{ formatCount(totalInstallations) }}
                         </p>
                         <Link
-                            href="/installations"
+                            :href="adminUrls.installations_index ?? '/installations'"
                             class="mt-3 inline-block text-sm font-medium text-gray-700 underline-offset-2 hover:text-gray-900 hover:underline"
                         >
                             Voir les installations
@@ -199,7 +253,7 @@ function activityBadgeClass(type) {
                             {{ formatCount(totalSubscriptions) }}
                         </p>
                         <Link
-                            href="/subscriptions"
+                            :href="adminUrls.subscriptions_index ?? '/subscriptions'"
                             class="mt-3 inline-block text-sm font-medium text-gray-700 underline-offset-2 hover:text-gray-900 hover:underline"
                         >
                             Voir les abonnements
@@ -214,7 +268,7 @@ function activityBadgeClass(type) {
                             {{ formatCount(totalPayments) }}
                         </p>
                         <Link
-                            href="/payments"
+                            :href="adminUrls.payments_index ?? '/payments'"
                             class="mt-3 inline-block text-sm font-medium text-gray-700 underline-offset-2 hover:text-gray-900 hover:underline"
                         >
                             Voir les paiements
@@ -259,11 +313,19 @@ function activityBadgeClass(type) {
             <div class="grid gap-8 xl:grid-cols-2">
                 <!-- C. État des installations -->
                 <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">
-                    <h2 class="text-lg font-semibold text-gray-900">
-                        État des installations
-                    </h2>
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                        <h2 class="text-lg font-semibold text-gray-900">
+                            État des installations
+                        </h2>
+                        <Link
+                            href="/installations"
+                            class="text-sm font-medium text-gray-600 underline-offset-2 hover:text-gray-900 hover:underline"
+                        >
+                            Toutes ({{ formatCount(totalInstallations) }})
+                        </Link>
+                    </div>
 
-                    <dl class="mt-6 grid gap-4 sm:grid-cols-3">
+                    <dl class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                         <Link
                             href="/installations?status=active"
                             class="block rounded-lg bg-gray-50 px-4 py-3 ring-1 ring-gray-100 transition hover:bg-gray-100 hover:ring-gray-200"
@@ -273,6 +335,18 @@ function activityBadgeClass(type) {
                             </dt>
                             <dd class="mt-1 text-2xl font-bold text-sky-800">
                                 {{ formatCount(activeInstallations) }}
+                            </dd>
+                        </Link>
+
+                        <Link
+                            href="/installations?status=inactive"
+                            class="block rounded-lg bg-gray-50 px-4 py-3 ring-1 ring-gray-100 transition hover:bg-gray-100 hover:ring-gray-200"
+                        >
+                            <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                Inactives
+                            </dt>
+                            <dd class="mt-1 text-2xl font-bold text-gray-700">
+                                {{ formatCount(inactiveInstallations) }}
                             </dd>
                         </Link>
 
@@ -360,6 +434,147 @@ function activityBadgeClass(type) {
                 </section>
             </div>
 
+            <div class="grid gap-8 xl:grid-cols-2">
+                <!-- Échéances (abonnements actifs) -->
+                <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">
+                    <h2 class="text-lg font-semibold text-gray-900">
+                        Échéances
+                    </h2>
+                    <p class="mt-1 text-sm text-gray-500">
+                        Abonnements actifs avec fin de période — seuils J-7, J-3, J-1 et J0 (UTC).
+                    </p>
+
+                    <dl class="mt-6 grid gap-4 sm:grid-cols-2">
+                        <Link
+                            :href="subscriptionsFilter({ period: 'future', status: 'active' })"
+                            class="block rounded-lg bg-gray-50 px-4 py-3 ring-1 ring-gray-100 transition hover:bg-gray-100 hover:ring-gray-200"
+                        >
+                            <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                Échéance future
+                            </dt>
+                            <dd class="mt-1 text-2xl font-bold text-gray-900">
+                                {{ formatCount(subscriptionDueStats.future) }}
+                            </dd>
+                        </Link>
+
+                        <Link
+                            :href="subscriptionsFilter({ period: 'due_7', status: 'active' })"
+                            class="block rounded-lg bg-gray-50 px-4 py-3 ring-1 ring-gray-100 transition hover:bg-gray-100 hover:ring-gray-200"
+                        >
+                            <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                J-7
+                            </dt>
+                            <dd class="mt-1 text-2xl font-bold text-sky-800">
+                                {{ formatCount(subscriptionDueStats.due_in_seven_days) }}
+                            </dd>
+                        </Link>
+
+                        <Link
+                            :href="subscriptionsFilter({ period: 'due_3', status: 'active' })"
+                            class="block rounded-lg bg-gray-50 px-4 py-3 ring-1 ring-gray-100 transition hover:bg-gray-100 hover:ring-gray-200"
+                        >
+                            <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                J-3
+                            </dt>
+                            <dd class="mt-1 text-2xl font-bold text-amber-900">
+                                {{ formatCount(subscriptionDueStats.due_in_three_days) }}
+                            </dd>
+                        </Link>
+
+                        <Link
+                            :href="subscriptionsFilter({ period: 'due_1', status: 'active' })"
+                            class="block rounded-lg bg-gray-50 px-4 py-3 ring-1 ring-gray-100 transition hover:bg-gray-100 hover:ring-gray-200"
+                        >
+                            <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                Demain (J-1)
+                            </dt>
+                            <dd class="mt-1 text-2xl font-bold text-orange-900">
+                                {{ formatCount(subscriptionDueStats.due_tomorrow) }}
+                            </dd>
+                        </Link>
+
+                        <Link
+                            :href="subscriptionsFilter({ period: 'due_0', status: 'active' })"
+                            class="block rounded-lg bg-gray-50 px-4 py-3 ring-1 ring-gray-100 transition hover:bg-gray-100 hover:ring-gray-200"
+                        >
+                            <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                Aujourd’hui (J0)
+                            </dt>
+                            <dd class="mt-1 text-2xl font-bold text-red-800">
+                                {{ formatCount(subscriptionDueStats.due_today) }}
+                            </dd>
+                        </Link>
+
+                        <Link
+                            :href="subscriptionsFilter({ period: 'expired', status: 'active' })"
+                            class="block rounded-lg bg-gray-50 px-4 py-3 ring-1 ring-gray-100 transition hover:bg-gray-100 hover:ring-gray-200"
+                        >
+                            <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                Période expirée
+                            </dt>
+                            <dd class="mt-1 text-2xl font-bold text-gray-700">
+                                {{ formatCount(subscriptionDueStats.period_expired) }}
+                            </dd>
+                        </Link>
+                    </dl>
+                </section>
+
+                <!-- Rappels -->
+                <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">
+                    <h2 class="text-lg font-semibold text-gray-900">
+                        Rappels d’échéance
+                    </h2>
+                    <p class="mt-1 text-sm text-gray-500">
+                        Synthèse read-only des enregistrements SubscriptionReminder.
+                    </p>
+
+                    <dl class="mt-6 grid gap-4 sm:grid-cols-3">
+                        <Link
+                            href="/subscription-reminders?status=detected"
+                            class="block rounded-lg bg-gray-50 px-4 py-3 ring-1 ring-gray-100 transition hover:bg-gray-100 hover:ring-gray-200"
+                        >
+                            <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                Détectés
+                            </dt>
+                            <dd class="mt-1 text-2xl font-bold text-sky-800">
+                                {{ formatCount(subscriptionReminderStats.detected) }}
+                            </dd>
+                        </Link>
+
+                        <Link
+                            href="/subscription-reminders?status=sent"
+                            class="block rounded-lg bg-gray-50 px-4 py-3 ring-1 ring-gray-100 transition hover:bg-gray-100 hover:ring-gray-200"
+                        >
+                            <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                Envoyés
+                            </dt>
+                            <dd class="mt-1 text-2xl font-bold text-emerald-800">
+                                {{ formatCount(subscriptionReminderStats.sent) }}
+                            </dd>
+                        </Link>
+
+                        <Link
+                            href="/subscription-reminders?status=failed"
+                            class="block rounded-lg bg-gray-50 px-4 py-3 ring-1 ring-gray-100 transition hover:bg-gray-100 hover:ring-gray-200"
+                        >
+                            <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                Échecs
+                            </dt>
+                            <dd class="mt-1 text-2xl font-bold text-red-800">
+                                {{ formatCount(subscriptionReminderStats.failed) }}
+                            </dd>
+                        </Link>
+                    </dl>
+
+                    <Link
+                        :href="adminUrls.subscription_reminders_index ?? '/subscription-reminders'"
+                        class="mt-4 inline-block text-sm font-medium text-gray-700 underline-offset-2 hover:text-gray-900 hover:underline"
+                    >
+                        Voir tous les rappels
+                    </Link>
+                </section>
+            </div>
+
             <!-- D. Paiements -->
             <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">
                 <h2 class="text-lg font-semibold text-gray-900">
@@ -367,16 +582,22 @@ function activityBadgeClass(type) {
                 </h2>
 
                 <dl class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-                    <div>
+                    <Link
+                        href="/payments"
+                        class="block rounded-lg bg-gray-50 px-3 py-2 ring-1 ring-gray-100 transition hover:bg-gray-100 hover:ring-gray-200"
+                    >
                         <dt class="text-sm font-medium text-gray-500">
                             Total
                         </dt>
                         <dd class="mt-1 text-xl font-bold text-gray-900">
                             {{ formatCount(totalPayments) }}
                         </dd>
-                    </div>
+                    </Link>
 
-                    <Link href="/payments?status=paid">
+                    <Link
+                        href="/payments?status=paid"
+                        class="block rounded-lg bg-gray-50 px-3 py-2 ring-1 ring-gray-100 transition hover:bg-gray-100 hover:ring-gray-200"
+                    >
                         <dt class="text-sm font-medium text-gray-500">
                             Payés
                         </dt>
@@ -385,7 +606,10 @@ function activityBadgeClass(type) {
                         </dd>
                     </Link>
 
-                    <Link href="/payments?status=pending">
+                    <Link
+                        href="/payments?status=pending"
+                        class="block rounded-lg bg-gray-50 px-3 py-2 ring-1 ring-gray-100 transition hover:bg-gray-100 hover:ring-gray-200"
+                    >
                         <dt class="text-sm font-medium text-gray-500">
                             En attente
                         </dt>
@@ -394,7 +618,10 @@ function activityBadgeClass(type) {
                         </dd>
                     </Link>
 
-                    <Link href="/payments?status=failed">
+                    <Link
+                        href="/payments?status=failed"
+                        class="block rounded-lg bg-gray-50 px-3 py-2 ring-1 ring-gray-100 transition hover:bg-gray-100 hover:ring-gray-200"
+                    >
                         <dt class="text-sm font-medium text-gray-500">
                             Échoués
                         </dt>
@@ -403,7 +630,10 @@ function activityBadgeClass(type) {
                         </dd>
                     </Link>
 
-                    <Link href="/payments?status=refunded">
+                    <Link
+                        href="/payments?status=refunded"
+                        class="block rounded-lg bg-gray-50 px-3 py-2 ring-1 ring-gray-100 transition hover:bg-gray-100 hover:ring-gray-200"
+                    >
                         <dt class="text-sm font-medium text-gray-500">
                             Remboursés
                         </dt>
@@ -412,14 +642,17 @@ function activityBadgeClass(type) {
                         </dd>
                     </Link>
 
-                    <div class="sm:col-span-2 lg:col-span-3 xl:col-span-1">
+                    <Link
+                        href="/payments?status=paid"
+                        class="block rounded-lg bg-gray-50 px-3 py-2 ring-1 ring-gray-100 transition hover:bg-gray-100 hover:ring-gray-200 sm:col-span-2 lg:col-span-3 xl:col-span-1"
+                    >
                         <dt class="text-sm font-medium text-gray-500">
                             Montant encaissé
                         </dt>
                         <dd class="mt-1 text-xl font-bold text-gray-900">
                             {{ formatFcfa(totalPaidAmount) }}
                         </dd>
-                    </div>
+                    </Link>
                 </dl>
             </section>
 
@@ -452,10 +685,10 @@ function activityBadgeClass(type) {
                         </p>
                         <Link
                             v-if="subscriptionsExpiringSoon > 0"
-                            href="/subscriptions?expiring_within_days=7"
+                            :href="subscriptionsFilter({ expiring_within_days: 7 })"
                             class="mt-3 inline-block text-sm font-medium text-amber-900 underline-offset-2 hover:underline"
                         >
-                            Consulter les abonnements
+                            Voir les abonnements
                         </Link>
                     </div>
 
@@ -481,10 +714,10 @@ function activityBadgeClass(type) {
                         </p>
                         <Link
                             v-if="overduePayments > 0"
-                            href="/payments?overdue=1"
+                            :href="paymentsFilter({ overdue: 1 })"
                             class="mt-3 inline-block text-sm font-medium text-red-800 underline-offset-2 hover:underline"
                         >
-                            Consulter les paiements
+                            Voir les paiements
                         </Link>
                     </div>
                 </div>

@@ -32,7 +32,7 @@ class DashboardAlertDeepLinksTest extends TestCase
 
     public function test_dashboard_exposes_positive_alert_counts_when_data_matches_filter_rules(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $subscription = $this->makeSubscription([
             'status' => Subscription::STATUS_ACTIVE,
             'current_period_end' => '2026-06-20 18:00:00',
@@ -60,7 +60,7 @@ class DashboardAlertDeepLinksTest extends TestCase
         $contents = file_get_contents(base_path('resources/js/Pages/Dashboard.vue'));
 
         $this->assertStringContainsString('v-if="subscriptionsExpiringSoon > 0"', $contents);
-        $this->assertStringContainsString('href="/subscriptions?expiring_within_days=7"', $contents);
+        $this->assertStringContainsString('subscriptionsFilter({ expiring_within_days: 7 })', $contents);
     }
 
     public function test_dashboard_vue_payment_alert_uses_overdue_filter_deep_link(): void
@@ -68,7 +68,7 @@ class DashboardAlertDeepLinksTest extends TestCase
         $contents = file_get_contents(base_path('resources/js/Pages/Dashboard.vue'));
 
         $this->assertStringContainsString('v-if="overduePayments > 0"', $contents);
-        $this->assertStringContainsString('href="/payments?overdue=1"', $contents);
+        $this->assertStringContainsString('paymentsFilter({ overdue: 1 })', $contents);
     }
 
     public function test_dashboard_vue_subscription_status_cards_use_status_filter_deep_links(): void
@@ -95,8 +95,8 @@ class DashboardAlertDeepLinksTest extends TestCase
     {
         $contents = file_get_contents(base_path('resources/js/Pages/Dashboard.vue'));
 
-        $this->assertStringContainsString('href="/subscriptions?expiring_within_days=7"', $contents);
-        $this->assertStringContainsString('href="/payments?overdue=1"', $contents);
+        $this->assertStringContainsString('subscriptionsFilter({ expiring_within_days: 7 })', $contents);
+        $this->assertStringContainsString('paymentsFilter({ overdue: 1 })', $contents);
     }
 
     public function test_dashboard_vue_installation_status_cards_use_status_filter_deep_links(): void
@@ -104,9 +104,9 @@ class DashboardAlertDeepLinksTest extends TestCase
         $contents = file_get_contents(base_path('resources/js/Pages/Dashboard.vue'));
 
         $this->assertStringContainsString('href="/installations?status=active"', $contents);
+        $this->assertStringContainsString('href="/installations?status=inactive"', $contents);
         $this->assertStringContainsString('href="/installations?status=suspended"', $contents);
         $this->assertStringContainsString('href="/installations?status=terminated"', $contents);
-        $this->assertStringNotContainsString('href="/installations?status=inactive"', $contents);
     }
 
     public function test_dashboard_vue_client_status_cards_use_status_filter_deep_links(): void
@@ -123,7 +123,7 @@ class DashboardAlertDeepLinksTest extends TestCase
         $contents = file_get_contents(base_path('resources/js/Pages/Dashboard.vue'));
 
         $this->assertStringContainsString('Voir les clients', $contents);
-        $this->assertMatchesRegularExpression('/href="\/clients"\s*\n/', $contents);
+        $this->assertStringContainsString('adminUrls.clients_index', $contents);
     }
 
     /**

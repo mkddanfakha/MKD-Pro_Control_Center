@@ -31,7 +31,7 @@ class SubscriptionIndexFiltersTest extends TestCase
 
     public function test_index_without_filters_returns_all_subscriptions(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
 
         Subscription::query()->create([
@@ -54,13 +54,15 @@ class SubscriptionIndexFiltersTest extends TestCase
             ->assertInertia(fn (Assert $page) => $page
                 ->component('Subscriptions/Index')
                 ->has('subscriptions.data', 2)
+                ->has('indicators')
                 ->where('filters.status', null)
+                ->where('filters.period', null)
                 ->where('filters.expiring_within_days', null));
     }
 
     public function test_index_filters_by_active_status(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $active = $this->makeSubscription(['status' => Subscription::STATUS_ACTIVE]);
         $this->makeSubscription([
             'installation_id' => $this->makeInstallation()->id,
@@ -78,7 +80,7 @@ class SubscriptionIndexFiltersTest extends TestCase
 
     public function test_index_filters_by_grace_period_status(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $grace = $this->makeSubscription(['status' => Subscription::STATUS_GRACE_PERIOD]);
         $this->makeSubscription([
             'installation_id' => $this->makeInstallation()->id,
@@ -95,7 +97,7 @@ class SubscriptionIndexFiltersTest extends TestCase
 
     public function test_index_filters_by_suspended_status(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $suspended = $this->makeSubscription(['status' => Subscription::STATUS_SUSPENDED]);
 
         $this->actingAs($user)
@@ -108,7 +110,7 @@ class SubscriptionIndexFiltersTest extends TestCase
 
     public function test_index_filters_by_terminated_status(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $terminated = $this->makeSubscription(['status' => Subscription::STATUS_TERMINATED]);
 
         $this->actingAs($user)
@@ -121,7 +123,7 @@ class SubscriptionIndexFiltersTest extends TestCase
 
     public function test_index_rejects_invalid_status(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
 
         $this->actingAs($user)
             ->get(route('subscriptions.index', ['status' => 'invalid']))
@@ -130,7 +132,7 @@ class SubscriptionIndexFiltersTest extends TestCase
 
     public function test_index_filters_expiring_within_seven_days(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
 
         $expiringSoon = $this->makeSubscription([
             'status' => Subscription::STATUS_ACTIVE,
@@ -154,7 +156,7 @@ class SubscriptionIndexFiltersTest extends TestCase
 
     public function test_index_excludes_period_end_outside_seven_day_window(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
 
         $inside = $this->makeSubscription([
             'status' => Subscription::STATUS_ACTIVE,
@@ -177,7 +179,7 @@ class SubscriptionIndexFiltersTest extends TestCase
 
     public function test_expiring_filter_excludes_grace_period_even_with_soon_end_date(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
 
         $this->makeSubscription([
             'status' => Subscription::STATUS_GRACE_PERIOD,
@@ -193,7 +195,7 @@ class SubscriptionIndexFiltersTest extends TestCase
 
     public function test_expiring_filter_excludes_suspended_even_with_soon_end_date(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
 
         $this->makeSubscription([
             'status' => Subscription::STATUS_SUSPENDED,
@@ -209,7 +211,7 @@ class SubscriptionIndexFiltersTest extends TestCase
 
     public function test_index_applies_status_and_expiring_filters_together(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
 
         $match = $this->makeSubscription([
             'status' => Subscription::STATUS_ACTIVE,
@@ -237,7 +239,7 @@ class SubscriptionIndexFiltersTest extends TestCase
 
     public function test_index_exposes_validated_filters_in_inertia_props(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $this->makeSubscription(['status' => Subscription::STATUS_ACTIVE]);
 
         $this->actingAs($user)
@@ -251,7 +253,7 @@ class SubscriptionIndexFiltersTest extends TestCase
 
     public function test_pagination_preserves_query_parameters(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
 
         for ($index = 0; $index < 16; $index++) {
             $this->makeSubscription([
@@ -277,7 +279,7 @@ class SubscriptionIndexFiltersTest extends TestCase
 
     public function test_index_inertia_page_includes_filter_props_for_ui(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $this->makeSubscription([
             'status' => Subscription::STATUS_ACTIVE,
             'current_period_end' => '2026-06-17 00:00:00',
