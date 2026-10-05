@@ -15,7 +15,6 @@ return [
 
     'default_monthly_amount' => 15000,
 
-,
 
     /*
     |--------------------------------------------------------------------------
@@ -32,6 +31,31 @@ return [
         'record_audit' => true,
         // Politique métier formalisée au Task 273 (voir docs/architecture/subscription-model.md).
         // Commande : subscriptions:renew-with-credit (planifiée daily ; inactive tant que enabled=false).
+    ],
+
+,
+
+    /*
+    |--------------------------------------------------------------------------
+    | Subscription expiry reminders — detection only (Task 281)
+    |--------------------------------------------------------------------------
+    */
+
+    'subscription_reminders' => [
+        'enabled' => env('SUBSCRIPTION_REMINDERS_ENABLED', false),
+        'days_before' => [7, 3, 1, 0],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Subscription reminder notifications — channel preparation (Task 284)
+    |--------------------------------------------------------------------------
+    */
+
+    'subscription_reminder_notifications' => [
+        'enabled' => env('SUBSCRIPTION_REMINDER_NOTIFICATIONS_ENABLED', false),
+        'channel' => env('SUBSCRIPTION_REMINDER_NOTIFICATION_CHANNEL', 'prepared'),
+        'central_admin_email' => env('SUBSCRIPTION_REMINDER_ADMIN_EMAIL'),
     ],
 
 ];

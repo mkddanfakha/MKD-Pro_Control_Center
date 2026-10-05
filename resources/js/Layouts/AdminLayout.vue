@@ -36,6 +36,11 @@ const navigation = [
         href: '/subscriptions',
     },
     {
+        label: 'Rappels',
+        href: '/subscription-reminders',
+        activePath: '/subscription-reminders',
+    },
+    {
         label: 'Paiements',
         href: '/payments',
     },

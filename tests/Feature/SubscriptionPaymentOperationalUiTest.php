@@ -8,6 +8,7 @@ use App\Models\Installation;
 use App\Models\Payment;
 use App\Models\Subscription;
 use App\Models\SubscriptionPaymentConsumption;
+use App\Models\SubscriptionReminder;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
@@ -326,12 +327,72 @@ class SubscriptionPaymentOperationalUiTest extends TestCase
         $this->assertSame(1, AuditLog::query()->where('action', 'subscription.credit_consumption_failed')->count());
     }
 
+public function test_reminders_index_exposes_thresholds_and_french_status_labels_in_ui(): void
+    {
+        $user = User::factory()->create();
+        $subscription = $this->makeSubscription();
+
+        foreach ([7, 3, 1, 0] as $threshold) {
+            SubscriptionReminder::query()->create([
+                'subscription_id' => $subscription->id,
+                'reminder_type' => SubscriptionReminder::TYPE_SUBSCRIPTION_EXPIRY,
+                'threshold_days' => $threshold,
+                'scheduled_for' => '2026-10-24 00:00:00',
+                'detected_at' => '2026-10-24 12:00:00',
+                'status' => SubscriptionReminder::STATUS_DETECTED,
+            ]);
+        }
+
+        $this->actingAs($user)
+            ->get(route('subscription-reminders.index'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('SubscriptionReminders/Index')
+                ->has('reminders.data', 4));
+
+        $indexVue = file_get_contents(base_path('resources/js/Pages/SubscriptionReminders/Index.vue'));
+        $this->assertStringContainsString('timeZone: \'UTC\'', $indexVue);
+        $this->assertStringContainsString('reminderStatusLabel', $indexVue);
+
+        $presentation = file_get_contents(base_path('resources/js/lib/adminPresentation.js'));
+        $this->assertStringContainsString('Détecté', $presentation);
+        $this->assertStringContainsString('Envoyé', $presentation);
+        $this->assertStringContainsString('Échec d’envoi', $presentation);
+    }
+
+    public function test_reminder_show_serializes_utc_dates(): void
+    {
+        $user = User::factory()->create();
+        $subscription = $this->makeSubscription();
+        $reminder = SubscriptionReminder::query()->create([
+            'subscription_id' => $subscription->id,
+            'reminder_type' => SubscriptionReminder::TYPE_SUBSCRIPTION_EXPIRY,
+            'threshold_days' => 3,
+            'scheduled_for' => '2026-10-28 00:00:00',
+            'detected_at' => '2026-10-27 08:00:00',
+            'status' => SubscriptionReminder::STATUS_SENT,
+            'sent_at' => '2026-10-27 09:00:00',
+        ]);
+
+        $this->actingAs($user)
+            ->get(route('subscription-reminders.show', $reminder))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('reminder.threshold_days', 3)
+                ->where('reminder.status', SubscriptionReminder::STATUS_SENT)
+                ->where('reminder.detected_at', '2026-10-27 08:00:00'));
+
+        $showVue = file_get_contents(base_path('resources/js/Pages/SubscriptionReminders/Show.vue'));
+        $this->assertStringContainsString('timeZone: \'UTC\'', $showVue);
+    }
+
     public function test_scheduler_lists_subscription_operational_commands(): void
     {
         Artisan::call('schedule:list');
         $output = Artisan::output();
 
         $this->assertStringContainsString('subscriptions:renew-with-credit', $output);
+        $this->assertStringContainsString('subscriptions:process-reminders', $output);
     }
 
     /**

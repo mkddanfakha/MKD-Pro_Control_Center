@@ -64,6 +64,7 @@ class HandleInertiaRequests extends Middleware
                 'installations_index' => route('installations.index'),
                 'subscriptions_index' => route('subscriptions.index'),
                 'payments_index' => route('payments.index'),
+                'subscription_reminders_index' => route('subscription-reminders.index'),
                 'audit_logs_index' => route('audit-logs.index'),
             ]
             : null,

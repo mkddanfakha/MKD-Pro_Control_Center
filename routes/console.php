@@ -13,3 +13,7 @@ Schedule::command('subscriptions:sync-lifecycle')->daily();
 Schedule::command('subscriptions:renew-with-credit')
     ->daily()
     ->withoutOverlapping();
+
+Schedule::command('subscriptions:process-reminders')
+    ->daily()
+    ->withoutOverlapping();

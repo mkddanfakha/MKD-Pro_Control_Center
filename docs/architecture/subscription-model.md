@@ -850,6 +850,450 @@ L’audit ne remplace pas le dry-run et ne consomme jamais de crédit.
 
 ---
 
+## Lifecycle, renouvellement automatique et rappels (Task 281)
+
+Responsabilités **distinctes** — ne pas les fusionner :
+
+| Domaine | Rôle | Effet sur les données |
+|---------|------|------------------------|
+| **Subscription lifecycle** | `subscriptions:sync-lifecycle` (scheduler) | Modifie le **statut** (`active` → `grace_period` → `suspended`, etc.) |
+| **Automatic credit renewal** | `subscriptions:renew-with-credit` | **Consomme** un mois de crédit (`SubscriptionPaymentConsumption`), avance la période |
+| **Reminder detection** | `subscriptions:reminder-audit` | **Observe** `current_period_end` et les seuils configurés — **aucune** mutation, **aucune** notification |
+
+Le renouvellement automatique répond à « la période est expirée et du crédit est disponible ». La détection de rappel répond à « la fin de période approche selon un seuil (7/3/1/0 jours) » pour un abonnement **actif** en période courante. Configurations indépendantes : `automatic_credit_renewal` et `subscription_reminders`.
+
+---
+
+## SubscriptionReminder — persistance des rappels (Task 282)
+
+```text
+Subscription
+    ↓
+SubscriptionReminder (detected / sent / failed)
+    ↓
+future notification channel (non implémenté)
+```
+
+- `SubscriptionReminder` **n’est pas** un `Payment` ni une `SubscriptionPaymentConsumption`.
+- N’**avance pas** la période commerciale et ne modifie pas le lifecycle.
+- Idempotence garantie par contrainte UNIQUE sur la clé logique (seuil + `scheduled_for`).
+
+---
+
+## NotificationData — composition des rappels (Task 283)
+
+```text
+Subscription
+    ↓
+SubscriptionReminder
+    ↓
+SubscriptionReminderNotificationData (titre + corps + destinataire logique)
+    ↓
+Future Notification Channel (non implémenté)
+```
+
+- `SubscriptionReminderNotificationData` est un **objet de composition** : ce n’est **pas** une notification envoyée, **pas** un `Payment`, **pas** un audit.
+- Destinataire actuel : `central_admin` (abstrait — pas de user client final).
+- Montant affiché : `Subscription.amount` (tarif effectif), pas `OfferVersion.price` ni `Payment.amount`.
+- Commande : `subscriptions:reminder-preview {id}` — preview uniquement.
+
+---
+
+## Sender et canal de notification (Task 284)
+
+```text
+SubscriptionReminder
+    ↓
+SubscriptionReminderNotificationComposer → NotificationData
+    ↓
+SubscriptionReminderNotificationSender
+    ↓
+SubscriptionReminderNotificationChannel (contrat)
+    ↓
+PreparedSubscriptionReminderChannel (défaut : prepared, sans envoi externe)
+EmailSubscriptionReminderChannel (Task 286 — Mail Laravel, `SUBSCRIPTION_REMINDER_ADMIN_EMAIL`)
+    ↓
+(futurs canaux SMS / push — non implémentés)
+```
+
+| Composant | Rôle |
+|-----------|------|
+| `SubscriptionReminderNotificationSender` | Orchestration (verrou InnoDB, compose, canal, transition) |
+| `PreparedSubscriptionReminderChannel` | Valide le routage, retourne `prepared` (défaut) |
+| `EmailSubscriptionReminderChannel` | `Mail` + `SubscriptionReminderMail` (Task 286) |
+| `subscription_reminder_notifications` | `enabled`, `channel` (`prepared`/`email`), `central_admin_email` |
+
+Après Task 285, le sender appelle `markAsSent()` / `markAsFailed()` lorsque le canal répond ; les états `sent` et `failed` sont **terminaux** (`already_sent` / `already_failed` sans retry). Task 286 ajoute le **premier envoi externe** via Laravel Mail (pas de classe `Notification` Laravel). Destinataire `central_admin` : `SUBSCRIPTION_REMINDER_ADMIN_EMAIL` (null → `unavailable`, rappel `failed`, aucun appel Mail). Anti-double-envoi : `lockForUpdate()` **avant** compose + envoi email (même transaction). Erreur transport → `error` → `failed`. Tests CI : `Mail::fake()` uniquement. CLI : `subscriptions:reminder-notification-test {id} [--channel=email]`.
+
+```text
+… → sender → canal prepared|email → transition detected→sent (ou failed)
+```
+
+---
+
+## Traitement quotidien des rappels (Task 287)
+
+`ProcessSubscriptionReminders` (`subscriptions:process-reminders`) enchaîne **sans dupliquer** la logique métier :
+
+```text
+chunk abonnements actifs (current_period_end)
+    ↓
+SubscriptionReminderService::assessReminder()
+    ↓
+recordDetectedReminder() (si nouveau uniquement → sender)
+    ↓
+SubscriptionReminderNotificationSender (si notifications enabled)
+```
+
+| Option | Rôle |
+|--------|------|
+| `--dry-run` | Détection simulée, aucune persistance ni envoi |
+| `--installation` / `--subscription` | Périmètre ciblé |
+| `--json` | Compteurs (`newly_detected`, `sent`, `failed`, `ignored`, …) + `duration_ms` |
+
+Rappels déjà enregistrés (`sent`, `failed`, `detected`) : **aucun** nouvel appel sender. Planification : `routes/console.php` — `daily()` + `withoutOverlapping()`, distinct de lifecycle et renouvellement crédit.
+
+Validation préproduction (Task 288) : `docs/operations/subscription-reminders-preprod-validation.md` — scénarios A–N, `Mail::fake()`, pas d’activation production.
+
+Préparation activation production (Task 290) : `docs/operations/subscription-reminders-production-activation.md` — procédure manuelle serveur, fonctionnalité **non** activée dans le dépôt.
+
+### Dashboard administratif — synthèse read-only (Task 293)
+
+Route **`/dashboard`** (`DashboardController`, page Inertia `Dashboard`) — accès **`auth`** + Gate **`accessControlCenter`**.
+
+| Bloc | Source | Lecture seule |
+|------|--------|----------------|
+| Installations / abonnements | Agrégations SQL (`COUNT`, `CASE`) sur `installations` et `subscriptions` | Oui |
+| Échéances | Abonnements **`active`** avec `current_period_end` — jours restants UTC alignés sur `SubscriptionReminderService` (seuils **7, 3, 1, 0**) | Oui |
+| Rappels | Comptages par `SubscriptionReminder.status` (`detected`, `sent`, `failed`) | Oui |
+
+Le dashboard **ne** déclenche **ni** `SubscriptionReminderNotificationSender`, **ni** notification email, **ni** mutation lifecycle / renouvellement / rappels. Liens vers `/subscriptions`, `/installations`, `/subscription-reminders` pour consultation uniquement.
+
+### Navigation Dashboard → listes administratives (Task 300)
+
+Les indicateurs opérationnels du **Dashboard** (`Dashboard.vue`) sont cliquables et ouvrent les listes read-only déjà protégées par **`accessControlCenter`**, avec les **filtres query string** reconnus par chaque index :
+
+| Destination | Exemples de deep-links |
+|-------------|------------------------|
+| `clients.index` | `/clients`, `/clients?status=active` |
+| `installations.index` | `/installations`, `/installations?status=suspended` |
+| `subscriptions.index` | `/subscriptions?status=grace_period`, `/subscriptions?period=due_7&status=active`, `/subscriptions?period=expired&status=active`, alerte `/subscriptions?expiring_within_days=7` |
+| `payments.index` | `/payments`, `/payments?status=paid`, `/payments?overdue=1` |
+| `subscription-reminders.index` | `/subscription-reminders?status=detected`, `/subscription-reminders?status=failed` |
+
+Aucun recalcul métier côté Vue : les liens ne font que transmettre des filtres vers les pages TASK 294–299.
+
+### Liste administrative des installations (Task 294)
+
+Route **`GET /installations`** (`InstallationController@index`, Inertia `Installations/Index`) — **`auth`** + Gate **`accessControlCenter`**.
+
+| Élément | Comportement |
+|---------|----------------|
+| Données | Nom, sous-domaine, domaine, statut installation, version, client, dates (`installed_at`, `last_seen_at`), abonnement courant non terminé (`status`, `current_period_end`), dernier rappel read-only optionnel |
+| Filtres serveur | `status`, `client_id`, `search` (name/subdomain/domain), `version` |
+| Pagination | 15 par page, query string conservé |
+| Exclusions | `database_name`, `database_host`, credentials — **non** exposés |
+| Actions | **Aucune** action provisioning / lifecycle depuis cette page (consultation + modal détail) |
+
+Les routes resource `installations` hors `index` restent distinctes ; la liste index est strictement orientée consultation.
+
+### Fiche installation — détail read-only (Task 295)
+
+Route **`GET /installations/{installation}`** (`InstallationController@show`, Inertia `Installations/Show`) — **`auth`** + Gate **`accessControlCenter`**.
+
+| Section | Contenu |
+|---------|---------|
+| Installation | Identité, statut, version, dates (`installed_at`, `last_seen_at`, …) sans champs de connexion DB |
+| Client | Coordonnées administratives déjà prévues (ex. `company_name`, `email`) |
+| Abonnement courant | Dernier abonnement **non terminé** uniquement ; sinon message « Aucun abonnement actif » |
+| Paiements | Liste paginée (`payments_page`), tri `created_at` DESC |
+| Rappels | Liste paginée (`reminders_page`), tri `scheduled_for` DESC — lecture seule, aucun envoi |
+
+Aucune action de provisioning, lifecycle, paiement ou notification depuis cette page.
+
+### Liste administrative des clients (Task 296)
+
+Route **`GET /clients`** (`ClientController@index`, Inertia `Clients/Index`) — **`auth`** + Gate **`accessControlCenter`**.
+
+| Élément | Comportement |
+|---------|----------------|
+| Données | Entreprise, contact, e-mail, téléphone, statut client, date de création |
+| Statistiques | Comptages SQL (`withCount`, sous-requête) : installations totales / actives / suspendues / terminées ; abonnements non terminés |
+| Filtres | `search` (client + installations liées), `status`, `email`, `phone` |
+| Pagination | 15 par page, `withQueryString()`, tri `created_at` DESC |
+| Action | Lien **Voir** → **`GET /clients/{client}`** (`clients.show`) — fiche client (consultation uniquement) |
+
+Aucune création, modification ou suppression depuis cette liste.
+
+### Liste administrative des paiements (Task 299)
+
+Route **`GET /payments`** (`PaymentController@index`, Inertia `Payments/Index`) — **`auth`** + Gate **`accessControlCenter`**.
+
+| Élément | Comportement |
+|---------|----------------|
+| Données | Paiement (montant encaissé `amount`, statut, dates, référence, crédit) ; abonnement ; installation ; client — sans champs de connexion DB |
+| Montants indicateurs | Sommes SQL sur **`Payment.amount`** selon le statut (`paid`, `pending`, `refunded`) — distinct du tarif abonnement et de `monthly_unit_amount` |
+| Crédit | `credit_months_purchased`, `credit_exhausted_at`, `consumptions_count` en lecture seule — aucune consommation depuis la liste |
+| Filtres | `status`, `payment_method`, `client_id`, `installation_id`, `subscription_id`, `search`, `date_from` / `date_to` (payé → `paid_at`, sinon `created_at`) ; compatibilité alerte `overdue=1` |
+| Tri | `created_at` DESC, `id` DESC |
+| Pagination | 15 par page, `withQueryString()` |
+| Action | **Voir l'installation** → `installations.show` uniquement |
+
+Aucune création, modification, remboursement, renouvellement ou consommation de crédit depuis cette liste.
+
+### Liste administrative des abonnements (Task 298)
+
+Route **`GET /subscriptions`** (`SubscriptionController@index`, Inertia `Subscriptions/Index`) — **`auth`** + Gate **`accessControlCenter`**.
+
+| Élément | Comportement |
+|---------|----------------|
+| Données | Abonnement (statut, montant, devise, dates de période) ; installation (identité, statut) ; client (id, raison sociale) — sans champs de connexion DB |
+| Indicateurs | Agrégations SQL : total et statuts ; échéances actives alignées sur `ControlCenterDashboardStatisticsService` / rappels (UTC, jours calendaires J-7, J-3, J-1, J0, expirée, future) |
+| Filtres | `status`, `installation_status`, `client_id`, `installation_id`, `search`, `period` (`future`, `due_7`, `due_3`, `due_1`, `due_0`, `expired`) ; compatibilité alerte dashboard `expiring_within_days=7` |
+| Tri | `current_period_end` ASC, puis `id` ASC (échéances proches en tête) |
+| Pagination | 15 par page, `withQueryString()` |
+| Action | **Voir l'installation** → `installations.show` uniquement |
+
+Aucune création, modification, renouvellement, rappel ou autre action métier depuis cette liste.
+
+### Fiche administrative client (Task 297)
+
+Route **`GET /clients/{client}`** (`ClientController@show`, Inertia `Clients/Show`) — **`auth`** + Gate **`accessControlCenter`**.
+
+| Section | Contenu |
+|---------|---------|
+| Informations client | Champs administratifs du modèle `Client` (sans données techniques) |
+| Statistiques | Agrégations SQL : installations (total, actives, inactives, suspendues, terminées) ; abonnements (actifs, grâce, suspendus, terminés) |
+| Installations | Liste paginée (`installations_page`), lien **Ouvrir la fiche** → `installations.show` |
+| Abonnements | Historique paginé (`subscriptions_page`), tri `current_period_end` DESC — terminés inclus |
+| Paiements | Liste paginée (`payments_page`) via jointures `subscriptions` / `installations` |
+| Rappels | Liste paginée (`reminders_page`), tri `scheduled_for` DESC — lecture seule, **aucun** appel au moteur d’envoi |
+
+Aucune action métier (création, modification, provisioning, paiement, renouvellement, rappel) depuis cette page.
+
+---
+
+## Planification scheduler — renouvellement par crédit (Task 275)
+
+### Tâches planifiées distinctes (`routes/console.php`)
+
+| Commande | Rôle | Fréquence |
+|----------|------|-----------|
+| `subscriptions:sync-lifecycle` | Statuts `active` → `grace_period` → `suspended` | **`daily()`** (00:00 `config('app.timezone')`, actuellement **UTC**) |
+| `subscriptions:renew-with-credit` | Consommation FIFO d’**un** mois prépayé (orchestrateur CLI) | **`daily()`** + **`withoutOverlapping()`** |
+| `subscriptions:process-reminders` | Détection + persistance + notification optionnelle (Task 287) | **`daily()`** + **`withoutOverlapping()`** |
+
+Le scheduler Laravel est déclenché en production par **`php artisan schedule:run`** (typiquement cron **chaque minute**). Les deux commandes peuvent tomber le même jour à minuit ; **aucune** ne contient de logique métier de l’autre.
+
+**Ordre d’enregistrement** : lifecycle puis renewal. Les deux ordres d’exécution manuels ou quasi-simultanés restent cohérents (crédit disponible → au plus une consommation ; lifecycle ne consomme pas).
+
+### Présence planifiée ≠ activation commerciale
+
+La commande planifiée s’exécute, mais si `automatic_credit_renewal.enabled` est **`false`**, elle **sort immédiatement** sans consommer ni modifier les abonnements. Déploiement du scheduler possible **avant** `SUBSCRIPTION_AUTOMATIC_CREDIT_RENEWAL_ENABLED=true`.
+
+### Chevauchement (`withoutOverlapping`)
+
+Sur `subscriptions:renew-with-credit` uniquement : mutex cache Laravel (expiration par défaut **24 h** si le processus ne se termine pas). Une seconde exécution concurrente **du même jour** est ignorée tant que le mutex est actif — complète l’idempotence métier (`now > current_period_end`, un mois par run).
+
+### Politique Task 273 inchangée
+
+`grace_period` / `suspended` + crédit → renouvellement possible via la commande planifiée ; `terminated` exclu ; sans crédit → renewal no-op, lifecycle continue.
+
+---
+
+## Cycle de vie subscription
+
+Transitions **automatiques** (commande `subscriptions:sync-lifecycle`, `SubscriptionService::syncLifecycle`) sur la **même** subscription :
+
+```text
+active
+    → (fin de current_period_end dépassée)
+grace_period
+    → (fin de grace_period_ends_at dépassée)
+suspended
+```
+
+État **`terminated`** :
+
+- Traité comme **terminal** pour le renouvellement dans le comportement actuel de `SubscriptionService` (renouvellement impossible).
+- **`syncLifecycle`** ne modifie **pas** une subscription déjà `terminated` (ni une subscription `suspended` : pas de transition automatique sortante documentée dans le service).
+
+La **période de grâce** (`grace_period`) reste la **même** subscription ; seul le `status` (et les dates associées) change.
+
+L’état **`suspended`** reste également la **même** ligne `subscriptions` (subscription courante non terminée). Une **consommation de crédit** depuis **`suspended`** peut, dans l’implémentation actuelle, **réactiver** la subscription (`active`) et **lever** les horodatages de grâce/suspension — voir § Subscription `suspended` et consommation de crédit.
+
+### Indépendance vis-à-vis de l’installation
+
+```text
+Installation.status ≠ Subscription.status
+```
+
+- Le cycle subscription **ne modifie jamais** `Installation.status`.
+- **`InstallationAccessService`** calcule l’**accès** (autorisé / non autorisé) à partir du **statut de la subscription** retenue pour l’installation, **pas** à partir de `Installation.status`.
+- Voir [`status-lifecycle.md`](status-lifecycle.md) pour le détail des statuts installation.
+
+---
+
+## Historique : Payment, consommations et AuditLog
+
+| Besoin | Support actuel |
+|--------|----------------|
+| Historique des **paiements** (montants, statuts, crédit acheté, indicateurs legacy) | Table **`payments`**, liée à `subscription_id` |
+| Historique des **mois de crédit consommés** et périodes financées | Table **`subscription_payment_consumptions`** |
+| Historique des **évolutions** subscription / paiement / consommation | **`audit_logs`** (ex. `subscription.created`, `subscription.updated`, `subscription.lifecycle_synced`, `subscription.credit_consumed`, `subscription.credit_consumption_failed`, `payment.created`, **`payment.updated`** — y compris changements `paid` ↔ `refunded`, `payment.deleted`, `payment.renewal_applied`, `payment.renewal_failed`, …) |
+
+Créer une nouvelle subscription par mois **n’est pas** le modèle retenu : les mois successifs sont reflétés par l’évolution de `current_period_*`, les lignes **`payments`** (crédit acheté) et les lignes **`subscription_payment_consumptions`** (crédit utilisé).
+
+---
+
+## Schéma SQL et politique d’unicité (état actuel)
+
+| Aspect | État actuel |
+|--------|-------------|
+| Relation Eloquent | `Installation` **hasMany** `Subscription` |
+| Unicité « non terminée » | **Imposée** : colonne générée `non_terminated_installation_id` + index unique `subscriptions_non_terminated_installation_id_unique` (migration `2026_09_24_164500_add_non_terminated_uniqueness_to_subscriptions_table.php`) |
+| Validation applicative | `SubscriptionController` (création + mise à jour) ; message « Cette installation possède déjà un abonnement non terminé. » |
+| Historique `terminated` | **Plusieurs** subscriptions `terminated` par installation **autorisées** |
+
+**Règle :** au **maximum une** subscription **non terminée** (`active`, `grace_period`, `suspended`) par installation ; **plusieurs** `terminated` possibles.
+
+Tests : `SubscriptionUniquenessConstraintTest`, `SubscriptionStoreTest`, `SubscriptionUpdateTest`.
+
+---
+
+## Accès installation et sélection de la subscription
+
+**`InstallationAccessService`** calcule l’accès à partir de la **subscription courante**, **pas** à partir de `Installation.status`.
+
+`latestSubscription()` sélectionne la subscription **non terminée** la plus récente (`status IN (active, grace_period, suspended)`, tri `latest('id')`). Les subscriptions **`terminated`** ne sont **pas** la subscription courante.
+
+| Subscription courante | Accès (`accessSummary`) |
+|-----------------------|-------------------------|
+| `active` | `accessible` — autorisé |
+| `grace_period` | `accessible` — autorisé |
+| `suspended` | `suspended` — non autorisé |
+| Aucune non terminée (uniquement `terminated` ou aucune ligne) | `no_subscription` — non autorisé |
+
+Voir [`status-lifecycle.md`](status-lifecycle.md) (§ Nuance `terminated` / `no_subscription`).
+
+Tests : `InstallationShowAccessTest`, `Tests\Unit\InstallationAccessServiceTest`.
+
+---
+
+## Dashboard (rappel)
+
+Statistiques **installations** : cartes `active`, `suspended`, `terminated` ; `inactive` filtrable sur `/installations?status=inactive` sans carte Dashboard.
+Statistiques **abonnements** : `active`, `grace_period`, `suspended`, `terminated`.
+Détail : [`status-lifecycle.md`](status-lifecycle.md) § Dashboard.
+
+---
+
+## Données observées le 24/09/2026
+
+Inspection en **lecture seule** (environnement de test / dev) :
+
+| Fait | Détail |
+|------|--------|
+| Installations | 3 |
+| Subscriptions | 2 |
+| Multi-subscriptions par installation | 0 |
+| Subscription **#2** | `active`, **sans** `current_period_start` / `current_period_end` |
+| Subscription **#3** | `grace_period`, **sans** `grace_period_ends_at` |
+
+Ces lignes sont des **données de test** ; **aucune correction automatique** n’a été appliquée lors de l’inspection.
+
+**Décision C (documentation) — pas de rétro-correction :** la politique d’initialisation ci-dessous **ne corrige pas** les données existantes. En l’état actuel de la base de test :
+
+- la subscription **#2** reste **`active` sans période** (`current_period_start` / `current_period_end` absents) ;
+- la subscription **#3** reste en **`grace_period` sans `grace_period_ends_at`**.
+
+Leur traitement fera l’objet d’**une tâche distincte**.
+
+---
+
+## Décisions produit
+
+### Décisions actées
+
+#### A. Après `terminated` — **décision prise** (option A retenue)
+
+Une subscription passée à **`terminated`** est **définitivement terminée** :
+
+- Elle **ne peut plus être renouvelée** ni **réactivée** (aligné avec le comportement actuel de `SubscriptionService::renew()`).
+- Si le client **reprend ultérieurement** son abonnement, une **nouvelle** subscription est **créée** pour ce **nouveau cycle commercial** (nouvelle ligne `subscriptions`).
+- L’**ancienne** subscription et ses **payments** associés **restent conservés** comme **historique** (pas de suppression implicite).
+- Cette règle correspond à l’**option A** identifiée lors de l’inspection Task 36 (nouvelle subscription après terminaison, pas de réactivation de la ligne terminée).
+
+#### B. Politique d’unicité — **décision prise**
+
+Une installation peut avoir **plusieurs subscriptions historiques**, mais **une seule subscription non `terminated` à la fois**.
+
+Règles :
+
+1. Plusieurs subscriptions **`terminated`** pour la **même** installation sont **autorisées** (historique de cycles commerciaux clos).
+2. Pour une installation donnée, il ne doit exister **qu’une seule** subscription parmi les statuts **`active`**, **`grace_period`** ou **`suspended`** (ensemble des statuts « non terminés »).
+3. Une **nouvelle** subscription ne peut être **créée** que lorsqu’il **n’existe aucune** subscription non `terminated` pour cette installation (typiquement : après `terminated`, ou première souscription).
+4. Une subscription **`suspended`** reste la **subscription courante** ; le **renouvellement nominal** passe par la **consommation de crédit** (`renewFromPayment` / FIFO). La méthode legacy **`renew()`** reste disponible pour compatibilité avec des règles plus strictes (voir § Renouvellement : chemin moderne vs `renew()` legacy).
+5. Une subscription **`terminated`** ne peut **plus** être réactivée ni renouvelée (cohérent avec la décision **A**).
+6. Lorsqu’un client **revient** après une subscription `terminated`, une **nouvelle** subscription **peut** être créée (nouveau cycle).
+7. La subscription courante est la subscription **non `terminated`** (unique lorsque la règle est respectée), sélectionnée par `InstallationAccessService` parmi `active` / `grace_period` / `suspended`.
+
+**Implémentation actuelle :** contrainte **base de données** (colonne générée + index unique) et **validation** dans `SubscriptionController` ; voir § Schéma SQL et politique d’unicité.
+
+#### C. Initialisation à la création — **décision prise**
+
+Règles métier pour une **nouvelle** subscription commerciale :
+
+1. Une nouvelle subscription doit être créée avec une **période initiale exploitable** (lifecycle et renouvellement par paiement supposent des dates de période cohérentes).
+2. **`starts_at`** représente le **véritable début commercial** de l’abonnement et **doit être renseigné** à la création.
+3. La période initiale est calculée **automatiquement** à partir de **`starts_at`** via la logique centralisée **`SubscriptionService::createInitialPeriod()`** (calendrier mensuel : `calculateNextPeriod`).
+4. **`current_period_start`** et **`current_period_end`** doivent être **initialisés ensemble**. Une **période partielle** (une seule des deux dates, ou saisie incohérente) **n’est pas** une création valide.
+5. Une nouvelle subscription commerciale est créée avec le statut initial **`active`**.
+6. **`grace_period`** et **`suspended`** sont des états issus du **cycle de vie** (ou de décisions ops ultérieures) ; ce ne sont **pas** les statuts normaux d’une **nouvelle** création.
+7. Une subscription **`terminated`** ne doit **pas** être réactivée ; après terminaison, une **nouvelle** subscription est créée (décision **A**).
+8. Lors de l’**implémentation**, la création devra être **atomique** : enregistrement de la subscription **et** initialisation de la période dans la **même transaction**.
+9. L’audit **`subscription.created`** devra refléter l’**état initial finalisé** de la subscription, **avec** sa période initiale renseignée (après `createInitialPeriod()`, pas un enregistrement sans période).
+10. La décision **B** s’applique : une nouvelle subscription ne peut être créée que s’il **n’existe aucune** subscription **non `terminated`** pour l’installation.
+
+**Implémentation actuelle :** `SubscriptionController::store()` impose **`starts_at`**, crée la subscription en **`active`**, appelle **`SubscriptionService::createInitialPeriod()`** dans une transaction, puis audite `subscription.created`. Les mises à jour manuelles restent soumises aux règles de validation du contrôleur (périodes, unicité).
+
+### Décisions encore ouvertes (modèle d’abonnement)
+
+**Aucune** pour les règles **A**, **B** et **C** ci-dessus. Les questions **produit** sur le sens ops de `Installation.inactive` et l’accès réel côté MKD-Pro Gestion restent dans [`status-lifecycle.md`](status-lifecycle.md) (§ Décisions à prendre avant l’accès réel).
+
+---
+
+## Données historiques / rétro-correction
+
+Les inspections antérieures (ex. Task 36, 24/09/2026) peuvent mentionner des subscriptions de test **sans période** ou **sans** `grace_period_ends_at`. La politique documentée ci-dessus décrit le **comportement attendu du code actuel** pour les **nouvelles** créations ; une **rétro-correction** des jeux de données existants reste une **tâche distincte** si nécessaire.
+
+---
+
+## Références code (lecture seule)
+
+| Composant | Fichier |
+|-----------|---------|
+| Défaut tarif à la création | `config/subscriptions.php` (`default_monthly_amount`) |
+| Modèles | `app/Models/Subscription.php`, `app/Models/Payment.php`, `app/Models/SubscriptionPaymentConsumption.php`, `app/Models/Installation.php` |
+| Périodes, lifecycle, crédit, consommation, FIFO | `app/Services/SubscriptionService.php` |
+| Accès calculé | `app/Services/InstallationAccessService.php` |
+| CRUD subscription, consommation FIFO HTTP, props crédit Show | `app/Http/Controllers/SubscriptionController.php` |
+| Paiements, calcul crédit à la création, renouvellement ciblé HTTP | `app/Http/Controllers/PaymentController.php` |
+| Tests HTTP cycle paid ↔ refunded, recalcul crédit | `tests/Feature/PaymentCreditHttpTest.php` |
+| Tests consommation depuis `suspended` (service + HTTP) | `tests/Feature/SubscriptionCreditConsumptionTest.php`, `tests/Feature/SubscriptionCreditConsumptionHttpTest.php` |
+| Sync lifecycle planifié | `app/Console/Commands/SyncSubscriptionLifecycle.php` |
+| UI crédit + consommation globale | `resources/js/Pages/Subscriptions/Show.vue` |
+| UI renouvellement ciblé paiement | `resources/js/Pages/Subscriptions/Payments/Show.vue` |
+
+---
+
+## Liens
+
+- [`status-lifecycle.md`](status-lifecycle.md) — séparation installation / subscription / accès
+- Task 36 — inspection « abonnement courant » et comparaison options A / B
+
+---
+
 ## Références code (lecture seule)
 
 | Composant | Fichier |

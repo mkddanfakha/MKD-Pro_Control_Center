@@ -11,6 +11,7 @@ use App\Http\Controllers\InstallationModuleController;
 use App\Http\Controllers\ModuleController;
 use App\Http\Controllers\PaymentController;
 use App\Http\Controllers\SubscriptionController;
+use App\Http\Controllers\SubscriptionReminderController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
@@ -61,6 +62,14 @@ Route::middleware('auth')->group(function () {
     Route::get('subscriptions/{subscription}', [SubscriptionController::class, 'show'])
         ->middleware('can:accessControlCenter')
         ->name('subscriptions.show');
+
+    Route::get('subscription-reminders', [SubscriptionReminderController::class, 'index'])
+        ->middleware('can:viewAny,'.\App\Models\SubscriptionReminder::class)
+        ->name('subscription-reminders.index');
+
+    Route::get('subscription-reminders/{subscription_reminder}', [SubscriptionReminderController::class, 'show'])
+        ->middleware('can:accessControlCenter')
+        ->name('subscription-reminders.show');
 
     Route::get('payments', [PaymentController::class, 'index'])
         ->middleware('can:accessControlCenter')
