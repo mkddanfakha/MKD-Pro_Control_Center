@@ -9,6 +9,7 @@ use App\Models\Subscription;
 use App\Models\SubscriptionPaymentConsumption;
 use App\Services\AuditLogService;
 use App\Services\SubscriptionService;
+use App\Support\OperationalActionAvailability;
 use DateTimeInterface;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -192,10 +193,12 @@ class PaymentController extends Controller
     public function edit(Payment $payment): Response
     {
         $payment->loadCount('consumptions');
+        $payment->loadMissing('subscription');
 
         return Inertia::render('Subscriptions/Payments/Edit', [
             'payment' => $payment,
             'subscriptions' => $this->subscriptionsForForm(),
+            'operational_actions' => OperationalActionAvailability::forPayment($payment),
         ]);
     }
 

@@ -11,6 +11,7 @@ use App\Models\SubscriptionOfferSnapshot;
 use App\Services\AuditLogService;
 use App\Services\Commercial\CommercialSubscriptionService;
 use App\Services\SubscriptionService;
+use App\Support\OperationalActionAvailability;
 use DateTimeInterface;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\RedirectResponse;
@@ -264,6 +265,8 @@ class SubscriptionController extends Controller
             'installations' => $installations,
             'credit' => $credit,
             'hasPendingPayments' => $hasPendingPayments,
+            'operational_actions' => OperationalActionAvailability::forSubscription($subscription),
+            'automatic_credit_renewal' => OperationalActionAvailability::automaticCreditRenewalState(),
         ]);
     }
 

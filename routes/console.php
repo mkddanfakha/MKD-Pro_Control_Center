@@ -9,3 +9,7 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('subscriptions:sync-lifecycle')->daily();
+
+Schedule::command('subscriptions:renew-with-credit')
+    ->daily()
+    ->withoutOverlapping();

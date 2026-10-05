@@ -345,7 +345,7 @@ function paymentMethodLabel(method) {
                         id="consume-payment-credit-title"
                         class="text-lg font-semibold text-gray-900"
                     >
-                        Consommer 1 mois de crédit
+                        Renouveler avec ce paiement
                     </h2>
 
                     <p class="mt-3 text-sm text-gray-600">
@@ -730,7 +730,7 @@ function paymentMethodLabel(method) {
                             :disabled="renewing"
                             @click="showRenewConfirm = true"
                         >
-                            Consommer 1 mois de crédit
+                            Renouveler avec ce paiement
                         </button>
                     </div>
 

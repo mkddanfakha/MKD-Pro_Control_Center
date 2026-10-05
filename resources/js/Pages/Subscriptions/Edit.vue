@@ -1,7 +1,7 @@
 <script setup>
 import AdminLayout from '@/Layouts/AdminLayout.vue';
-import { Head, Link, useForm } from '@inertiajs/vue3';
-import { computed } from 'vue';
+import { Head, Link, router, useForm } from '@inertiajs/vue3';
+import { computed, ref } from 'vue';
 
 const props = defineProps({
     subscription: {
@@ -20,7 +20,18 @@ const props = defineProps({
         type: Boolean,
         required: true,
     },
+    operational_actions: {
+        type: Object,
+        required: true,
+    },
+    automatic_credit_renewal: {
+        type: Object,
+        required: true,
+    },
 });
+
+const consumingCredit = ref(false);
+const showConsumeCreditConfirm = ref(false);
 
 function toDatetimeLocalValue(value) {
     if (value === null || value === undefined) {
@@ -113,6 +124,22 @@ const submit = () => {
         onFinish: () => {},
     });
 };
+
+function confirmConsumeCredit() {
+    if (consumingCredit.value || !props.operational_actions.can_consume_credit) {
+        return;
+    }
+
+    consumingCredit.value = true;
+
+    router.post(props.operational_actions.consume_credit_url, {}, {
+        preserveScroll: true,
+        onFinish: () => {
+            consumingCredit.value = false;
+            showConsumeCreditConfirm.value = false;
+        },
+    });
+}
 </script>
 
 <template>
@@ -211,7 +238,7 @@ const submit = () => {
                                 for="amount"
                                 class="block text-sm font-medium text-gray-700"
                             >
-                                Montant mensuel (tarif en vigueur)
+                                Tarif actuel
                                 <span class="text-red-600" aria-hidden="true">*</span>
                             </label>
 
@@ -600,6 +627,95 @@ const submit = () => {
                         </p>
                     </div>
                 </section>
+
+                <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">
+                    <h2 class="text-lg font-semibold text-gray-900">
+                        Actions opérationnelles
+                    </h2>
+
+                    <p class="mt-1 text-sm text-gray-500">
+                        Consommation FIFO du crédit déjà payé. Les montants et éligibilités sont calculés côté serveur.
+                    </p>
+
+                    <p class="mt-3 text-xs text-gray-600">
+                        {{ operational_actions.fifo_help }}
+                    </p>
+
+                    <div
+                        v-if="operational_actions.can_consume_credit"
+                        class="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center"
+                    >
+                        <button
+                            type="button"
+                            class="inline-flex items-center justify-center rounded-lg bg-emerald-800 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-emerald-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-800 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+                            :disabled="consumingCredit || form.processing"
+                            @click="showConsumeCreditConfirm = true"
+                        >
+                            {{ consumingCredit ? 'Consommation en cours…' : 'Consommer 1 mois de crédit' }}
+                        </button>
+
+                        <p class="text-sm text-gray-600">
+                            Crédit disponible (serveur) :
+                            <span class="font-medium text-gray-900">{{ formatCreditMonthsLabel(availableCreditMonths) }}</span>
+                        </p>
+                    </div>
+
+                    <p
+                        v-else
+                        class="mt-6 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700"
+                    >
+                        {{ operational_actions.unavailable_reason }}
+                    </p>
+
+                    <p
+                        v-if="!automatic_credit_renewal.enabled"
+                        class="mt-4 text-xs text-gray-500"
+                    >
+                        Le renouvellement automatique par crédit (planificateur) est désactivé dans la configuration
+                        serveur ; aucune action de cette page ne l’active.
+                    </p>
+                </section>
+
+                <div
+                    v-if="showConsumeCreditConfirm"
+                    class="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/40 p-4"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="consume-credit-dialog-title"
+                >
+                    <div class="w-full max-w-md rounded-xl bg-white p-6 shadow-lg ring-1 ring-gray-200">
+                        <h3
+                            id="consume-credit-dialog-title"
+                            class="text-lg font-semibold text-gray-900"
+                        >
+                            Confirmer la consommation
+                        </h3>
+
+                        <p class="mt-2 text-sm text-gray-600">
+                            Consommer un mois de crédit sur cet abonnement et prolonger la période selon la règle FIFO ?
+                        </p>
+
+                        <div class="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                            <button
+                                type="button"
+                                class="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-gray-50"
+                                :disabled="consumingCredit"
+                                @click="showConsumeCreditConfirm = false"
+                            >
+                                Annuler
+                            </button>
+
+                            <button
+                                type="button"
+                                class="inline-flex items-center justify-center rounded-lg bg-emerald-800 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-emerald-900 disabled:cursor-not-allowed disabled:opacity-60"
+                                :disabled="consumingCredit"
+                                @click="confirmConsumeCredit"
+                            >
+                                {{ consumingCredit ? 'Consommation…' : 'Consommer 1 mois de crédit' }}
+                            </button>
+                        </div>
+                    </div>
+                </div>
 
                 <div class="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
                     <Link

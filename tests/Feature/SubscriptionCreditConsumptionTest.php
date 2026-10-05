@@ -529,7 +529,7 @@ class SubscriptionCreditConsumptionTest extends TestCase
         $user = User::factory()->create();
         $subscription = $this->makeSubscription(['amount' => 15000]);
 
-        $this->updateSubscriptionAmountViaHttp($subscription, 20000);
+        $this->updateSubscriptionAmountViaHttp($subscription, 20000, $user);
 
         $response = $this->actingAs($user)->post(route('payments.store'), [
             'subscription_id' => $subscription->id,
@@ -897,9 +897,9 @@ class SubscriptionCreditConsumptionTest extends TestCase
         $this->assertSame(5, $desyncEarlier->fresh()->remainingCreditMonths());
     }
 
-    private function updateSubscriptionAmountViaHttp(Subscription $subscription, int $amount): void
+    private function updateSubscriptionAmountViaHttp(Subscription $subscription, int $amount, ?User $user = null): void
     {
-        $user = User::factory()->create();
+        $user ??= User::factory()->controlCenterAdmin()->create();
 
         $this->actingAs($user)->put(
             route('subscriptions.update', $subscription),

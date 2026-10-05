@@ -1,7 +1,7 @@
 <script setup>
 import AdminLayout from '@/Layouts/AdminLayout.vue';
-import { Head, Link, useForm } from '@inertiajs/vue3';
-import { computed, watch } from 'vue';
+import { Head, Link, router, useForm } from '@inertiajs/vue3';
+import { computed, ref, watch } from 'vue';
 
 const props = defineProps({
     payment: {
@@ -12,7 +12,14 @@ const props = defineProps({
         type: Array,
         required: true,
     },
+    operational_actions: {
+        type: Object,
+        required: true,
+    },
 });
+
+const renewingFromPayment = ref(false);
+const showRenewConfirm = ref(false);
 
 const knownPaymentMethods = ['wave', 'cash', 'bank_transfer', 'other'];
 
@@ -103,6 +110,22 @@ const submit = () => {
         onFinish: () => {},
     });
 };
+
+function confirmRenewFromPayment() {
+    if (renewingFromPayment.value || !props.operational_actions.can_renew_from_payment) {
+        return;
+    }
+
+    renewingFromPayment.value = true;
+
+    router.post(props.operational_actions.renew_subscription_url, {}, {
+        preserveScroll: true,
+        onFinish: () => {
+            renewingFromPayment.value = false;
+            showRenewConfirm.value = false;
+        },
+    });
+}
 </script>
 
 <template>
@@ -574,6 +597,79 @@ const submit = () => {
                         </p>
                     </div>
                 </section>
+
+                <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-8">
+                    <h2 class="text-lg font-semibold text-gray-900">
+                        Renouvellement depuis ce paiement
+                    </h2>
+
+                    <p class="mt-1 text-sm text-gray-500">
+                        Action distincte de la consommation FIFO au niveau abonnement : ce renouvellement utilise
+                        explicitement le crédit de ce paiement, sous réserve des contrôles serveur.
+                    </p>
+
+                    <div
+                        v-if="operational_actions.can_renew_from_payment"
+                        class="mt-6"
+                    >
+                        <button
+                            type="button"
+                            class="inline-flex items-center justify-center rounded-lg bg-sky-800 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-sky-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-800 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+                            :disabled="renewingFromPayment || form.processing"
+                            @click="showRenewConfirm = true"
+                        >
+                            {{ renewingFromPayment ? 'Renouvellement en cours…' : 'Renouveler avec ce paiement' }}
+                        </button>
+                    </div>
+
+                    <p
+                        v-else
+                        class="mt-6 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700"
+                    >
+                        {{ operational_actions.unavailable_reason }}
+                    </p>
+                </section>
+
+                <div
+                    v-if="showRenewConfirm"
+                    class="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/40 p-4"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="renew-payment-dialog-title"
+                >
+                    <div class="w-full max-w-md rounded-xl bg-white p-6 shadow-lg ring-1 ring-gray-200">
+                        <h3
+                            id="renew-payment-dialog-title"
+                            class="text-lg font-semibold text-gray-900"
+                        >
+                            Confirmer le renouvellement
+                        </h3>
+
+                        <p class="mt-2 text-sm text-gray-600">
+                            Renouveler l’abonnement en consommant un mois de crédit sur ce paiement ?
+                        </p>
+
+                        <div class="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                            <button
+                                type="button"
+                                class="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-gray-50"
+                                :disabled="renewingFromPayment"
+                                @click="showRenewConfirm = false"
+                            >
+                                Annuler
+                            </button>
+
+                            <button
+                                type="button"
+                                class="inline-flex items-center justify-center rounded-lg bg-sky-800 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-sky-900 disabled:cursor-not-allowed disabled:opacity-60"
+                                :disabled="renewingFromPayment"
+                                @click="confirmRenewFromPayment"
+                            >
+                                {{ renewingFromPayment ? 'Renouvellement…' : 'Renouveler avec ce paiement' }}
+                            </button>
+                        </div>
+                    </div>
+                </div>
 
                 <div class="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
                     <Link

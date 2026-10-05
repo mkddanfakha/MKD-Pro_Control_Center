@@ -23,6 +23,12 @@ class SubscriptionService
     /**
      * Synchronise le statut de l'abonnement avec la date courante (cycle de vie).
      */
+    /**
+     * Synchronise uniquement le cycle de vie commercial (statuts et dates de grâce/suspension).
+     *
+     * Ne consomme pas de crédit Payment, ne modifie pas current_period_start/end pour prolonger
+     * une période, ne crée pas de Payment ni de SubscriptionPaymentConsumption.
+     */
     public function syncLifecycle(Subscription $subscription, ?Carbon $now = null): Subscription
     {
         $now ??= now();
@@ -109,6 +115,14 @@ class SubscriptionService
 
     /**
      * Calcule les champs de crédit d'un paiement à partir du montant et de l'abonnement.
+     *
+     * À la création HTTP, {@see monthly_unit_amount} est figé depuis {@see Subscription::$amount}
+     * (tarif courant, pas le prix catalogue OfferVersion). Ensuite, la consommation et le crédit
+     * restant s'appuient sur {@see Payment::$monthly_unit_amount} et {@see Payment::$credit_months_purchased}
+     * stockés, jamais sur un recalcul silencieux depuis le tarif courant de l'abonnement.
+     *
+     * credit_months_purchased = amount / monthly_unit_amount uniquement si amount % monthly_unit_amount === 0
+     * (aucun arrondi floor/ceil).
      *
      * @return array{monthly_unit_amount: int, credit_months_purchased: int}
      *
@@ -272,6 +286,10 @@ class SubscriptionService
     /**
      * Consomme le prochain mois de crédit disponible pour l'abonnement (FIFO : paid_at, puis id).
      *
+     * Avance {@see Subscription::$current_period_start} / {@see Subscription::$current_period_end}
+     * d'exactement une période calendaire via {@see performCreditConsumption()}.
+     * Ne recalcule jamais le crédit depuis {@see OfferVersion} ni le tarif courant de l'abonnement.
+     *
      * @throws SubscriptionRenewalException
      */
     public function consumeNextCreditForSubscription(Subscription $subscription): SubscriptionPaymentConsumption
@@ -304,7 +322,46 @@ class SubscriptionService
     }
 
     /**
+     * Aperçu lecture seule du prochain mois FIFO (dry-run — Task 277). Aucune écriture en base.
+     *
+     * @return array{
+     *     payment_id: int,
+     *     remaining_months_before: int,
+     *     period_start: string,
+     *     period_end: string
+     * }|null
+     */
+    public function previewNextFifoCreditConsumption(Subscription $subscription): ?array
+    {
+        if ($subscription->isTerminated()) {
+            return null;
+        }
+
+        $payment = $this->findNextFifoEligiblePaymentForSubscription($subscription);
+
+        if ($payment === null) {
+            return null;
+        }
+
+        try {
+            $nextPeriod = $this->calculateNextSubscriptionPeriod($subscription);
+        } catch (SubscriptionRenewalException) {
+            return null;
+        }
+
+        return [
+            'payment_id' => (int) $payment->id,
+            'remaining_months_before' => $this->remainingCreditMonthsForPayment($payment),
+            'period_start' => $nextPeriod['start']->format('Y-m-d H:i:s'),
+            'period_end' => $nextPeriod['end']->format('Y-m-d H:i:s'),
+        ];
+    }
+
+    /**
      * Consomme un mois de crédit du paiement et ouvre la période suivante sur l'abonnement.
+     *
+     * Parcours ciblé : le crédit restant provient de {@see Payment::$credit_months_purchased}
+     * moins le nombre de lignes {@see SubscriptionPaymentConsumption}, pas de {@see Subscription::$amount}.
      */
     public function consumeCreditFromPayment(Payment $payment): SubscriptionPaymentConsumption
     {

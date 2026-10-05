@@ -567,6 +567,289 @@ Les inspections antérieures (ex. Task 36, 24/09/2026) peuvent mentionner des su
 
 ---
 
+### Interface Subscription Show (état actuel)
+
+`Subscriptions/Show.vue` affiche (props **`credit`** calculées serveur) :
+
+- crédit disponible (`available_months`) ;
+- nombre de paiements (`payment_count`) ;
+- par paiement : montant, mois achetés, mois restants, mensualité de référence, date de paiement, nombre de consommations, indication remboursé ;
+
+et propose **« Consommer le prochain crédit »** lorsqu’un crédit **consommable** existe. Le frontend **n’envoie pas** de `payment_id` et **ne recalcule pas** le crédit.
+
+Référence code : `app/Services/SubscriptionService.php`, `app/Http/Controllers/SubscriptionController.php`, `app/Http/Controllers/PaymentController.php`.
+
+---
+
+## Politique de renouvellement de période (Task 271)
+
+### Trois notions distinctes
+
+| Notion | Support | Rôle |
+|--------|---------|------|
+| **Période couverte** | `current_period_start`, `current_period_end` | Fenêtre calendaire **actuellement** portée par la subscription |
+| **Crédit disponible** | `credit_months_purchased` − COUNT(`subscription_payment_consumptions`) | Mois **payés** mais pas encore **appliqués** à une période |
+| **État commercial** | `status`, `grace_period_ends_at`, `suspended_at`, … | Cycle de vie **indépendant** du stock de crédit |
+
+**Crédit disponible ≠ période déjà prolongée.** Tant qu’aucune ligne `subscription_payment_consumptions` n’existe pour un mois donné, la période **n’est pas** considérée comme financée pour ce mois, même si des paiements `paid` possèdent du crédit restant.
+
+### Décision fonctionnelle implémentée aujourd’hui
+
+Le code actuel correspond à **l’option A** pour **l’extension de période** :
+
+- **Aucune** prolongation automatique de `current_period_*` lorsque `current_period_end` est dépassée, **même** si du crédit Payment est disponible.
+- L’administrateur (ou un futur job **non présent aujourd’hui**) doit déclencher explicitement **`performCreditConsumption()`** via :
+  - `POST /subscriptions/{subscription}/consume-credit` (FIFO), ou
+  - `POST /payments/{payment}/renew-subscription` (ciblé).
+
+**Option B** (consommation automatique à l’échéance de période) **n’est pas implémentée** : ni dans `SubscriptionService::syncLifecycle()`, ni dans `subscriptions:sync-lifecycle`, ni ailleurs dans le dépôt au moment du Task 271.
+
+**Option C partielle (lifecycle automatique sans renouvellement)** : la commande planifiée **`subscriptions:sync-lifecycle`** ne fait **que** des transitions de **statut** sur les abonnements `active` et `grace_period` :
+
+```text
+active + current_period_end dépassée  →  grace_period (+ grace_period_ends_at si absent)
+grace_period + grace_period_ends_at dépassée  →  suspended (+ suspended_at si absent)
+```
+
+Elle **ne** consomme **pas** de crédit, **ne** crée **pas** de Payment, **ne** modifie **pas** `current_period_start` / `current_period_end` pour « rattraper » une période expirée.
+
+### Scénarios cartographiés (comportement réel)
+
+| Situation | Période | Crédit | Effet sans action manuelle |
+|-----------|---------|--------|----------------------------|
+| `active`, période future | Valide | quelconque | Inchangé (sync ne touche pas) |
+| `active`, période expirée | Expirée | oui | `active` → `grace_period` ; période **inchangée** ; crédit **intact** |
+| `active`, période expirée | Expirée | non | Idem → `grace_period` puis éventuellement `suspended` après grâce |
+| `grace_period`, grâce valide | Expirée | oui | Statut grâce ; accès date-aware selon `InstallationAccessService` |
+| `grace_period`, grâce expirée | Expirée | oui | → `suspended` ; crédit **toujours** intact tant qu’aucune consommation |
+| `suspended` | Expirée | oui | Sync **ignore** ; consommation **manuelle** possible → `active` + avance d’**un** mois |
+| `terminated` | — | oui | Sync **ignore** ; consommation **refusée** |
+
+### Automatisation future
+
+Toute **consommation automatique** de crédit à l’échéance devra réutiliser **`performCreditConsumption()`** (même audits, mêmes verrous, même idempotence) et fera l’objet d’un **chantier séparé** avec règles produit explicites. Le Task 271 **ne l’ajoute pas**.
+
+---
+
+## Préparation du renouvellement automatique par crédit — Task 272
+
+### État : **non activé en production**
+
+| Élément | Rôle |
+|---------|------|
+| `config('subscriptions.automatic_credit_renewal.enabled')` | **`false` par défaut** (`SUBSCRIPTION_AUTOMATIC_CREDIT_RENEWAL_ENABLED`) |
+| `SubscriptionAutomaticCreditRenewalService` | Orchestrateur **préparatoire** ; **n’est pas** appelé par `subscriptions:sync-lifecycle` |
+| Moteur réel | **`SubscriptionService::consumeNextCreditForSubscription()`** → **`performCreditConsumption()`** (FIFO inchangé) |
+
+Tant que `enabled` est `false`, **`attemptAutomaticRenewal()`** retourne `outcome = disabled` **sans** consommer de crédit. Le scheduler lifecycle continue **exactement** comme au Task 271.
+
+### Éligibilité (`assessEligibility`)
+
+Conditions **techniques** prévues pour une future activation (évaluation seule, sans effet si désactivé) :
+
+1. Subscription **non** `terminated` ;
+2. `current_period_end` renseigné ;
+3. **`now > current_period_end`** (échéance de la période couverte dépassée — compatible avec l’accès date-aware) ;
+4. `summarizeSubscriptionCreditForDisplay().available_months > 0` (crédit **consommable**, FIFO futur).
+
+**Ne pas** consommer uniquement parce qu’un Payment `paid` existe tant que la période n’est pas expirée.
+
+### FIFO et un mois par tentative
+
+Chaque **`attemptAutomaticRenewal()`** réussi ne doit consommer **qu’un** mois via le FIFO existant (`paid_at ASC`, `id ASC`). Un paiement de 45 000 FCFA / 15 000 FCFA = **3** consommations **distinctes** sur **3** échéances distinctes — jamais +3 mois en une opération.
+
+### Idempotence et concurrence
+
+Réutilisation des **transactions**, **`lockForUpdate`**, contrainte unique `(subscription_id, period_start, period_end)` et contrôle du crédit restant. Deux tentatives sur la **même** échéance : la seconde voit en général `period_not_expired` après la première consommation. Scénarios concurrents : mêmes garanties que `PaymentConcurrencyTest`.
+
+### Audits (lors d’une future activation)
+
+Événement existant **`subscription.credit_consumed`**, avec contexte JSON **`renewal_trigger: automatic_credit_renewal`** dans `old_values` / `new_values` (pas de nouvelle table). Consommation manuelle FIFO HTTP conserve l’audit actuel **sans** ce trigger ; renouvellement ciblé conserve **`payment.renewal_applied`**.
+
+### Interdictions inchangées
+
+Pas de création de **Payment**, pas de Wave/Orange Money, pas de recalcul de crédit historique, pas de réactivation **`terminated`**.
+
+---
+
+## Politique métier — renouvellement automatique par crédit (Task 273)
+
+**Le renouvellement automatique reste désactivé tant que `SUBSCRIPTION_AUTOMATIC_CREDIT_RENEWAL_ENABLED=false`.**
+
+### Deux politiques distinctes
+
+| Politique | Responsable | Effet |
+|-----------|-------------|--------|
+| **Lifecycle** | `subscriptions:sync-lifecycle` | `active` → `grace_period` → `suspended` ; **ne consomme pas** de crédit ; **ne modifie pas** `current_period_*` |
+| **Renouvellement par crédit** | `SubscriptionAutomaticCreditRenewalService` (+ commande **`subscriptions:renew-with-credit`**) | Consomme **un mois déjà payé** via `performCreditConsumption()` ; **une** consommation = **une** période |
+
+Le scheduler lifecycle **n’appelle pas** le renouvellement automatique. La commande dédiée existe mais **n’est pas planifiée** dans `routes/console.php` tant que la fonctionnalité n’est pas activée volontairement.
+
+### Cas A — période encore valide
+
+Si `now <= current_period_end` : **aucune** consommation (`period_not_expired`). À l’instant exact de `current_period_end`, la période est encore valide (aligné `InstallationAccessService`).
+
+### Cas B — période expirée + crédit
+
+Si `now > current_period_end`, subscription **non** `terminated`, crédit consommable > 0 : **une** consommation FIFO autorisée **par appel** (`consumeNextCreditForSubscription`).
+
+### Cas C — période expirée sans crédit
+
+Aucune consommation automatique. Le lifecycle continue (`grace_period`, puis `suspended`).
+
+### Cas D — `terminated`
+
+Toujours interdit (`subscription_terminated`). Aucune consommation ni réactivation.
+
+### Cas E — `grace_period` (décision Task 273)
+
+**Option 1 retenue** : dès que `now > current_period_end` et qu’il reste du crédit, le renouvellement automatique **peut** consommer un mois, **y compris** en `grace_period`. Effet identique à la consommation manuelle : `active`, `grace_period_ends_at` effacé, période avancée d’**un** mois via le moteur existant.
+
+### Cas F — `suspended` (décision Task 273)
+
+Consommation automatique **autorisée** lorsque les critères d’échéance et de crédit sont remplis (**parité** avec consommation manuelle : `performCreditConsumption()` remet `active` et efface `suspended_at`). Ce n’est **pas** une réactivation par le scheduler lifecycle (qui ignore les `suspended`).
+
+### Retard / rattrapage
+
+Si la commande s’exécute longtemps après l’échéance, **un seul** mois calendaire est consommé par exécution et par subscription (`calculateNextSubscriptionPeriod()` depuis `current_period_end`). Pas de rattrapage multi-mois en une passe.
+
+### FIFO, idempotence, concurrence, audit
+
+Inchangés (Task 272) : FIFO moteur ; idempotence via verrous + contrainte unique ; audit `subscription.credit_consumed` + `renewal_trigger: automatic_credit_renewal`.
+
+### Activation
+
+`config/subscriptions.php` : `automatic_credit_renewal.enabled` = **`false`**. Brancher éventuellement `subscriptions:renew-with-credit` au scheduler **uniquement** après validation produit et `enabled=true` — hors périmètre Task 273.
+
+---
+
+## Exploitation CLI — renouvellement par crédit (Task 274)
+
+### Commande
+
+`php artisan subscriptions:renew-with-credit` — orchestrateur CLI uniquement ; délègue à `SubscriptionAutomaticCreditRenewalService` (aucune logique FIFO/crédit dans la commande).
+
+| État config | Comportement |
+|-------------|--------------|
+| `enabled=false` (défaut) | Sortie immédiate, code **0**, **aucune** consommation ni modification |
+| `enabled=true` (tests / activation volontaire) | Parcourt `querySubscriptionsForRenewalEvaluation()` puis `attemptAutomaticRenewal()` — **1 mois max** par abonnement et par exécution |
+
+### Périmètre parcouru
+
+Abonnements à période commerciale expirée (`current_period_end` &lt; now), non `terminated`, statuts autorisés par la politique Task 273. L’éligibilité finale (crédit, etc.) est **`assessEligibility()`** ; absence de crédit ou période encore valide = **ignoré**, pas une erreur technique.
+
+### Sortie et erreurs
+
+Résumé : évalués / renouvelés / ignorés / refusés / erreurs techniques. Une exception non gérée sur un abonnement est journalisée ; le traitement continue ; code de sortie **≠ 0** si au moins une erreur technique.
+
+### Planification future (non activée)
+
+1. Valider manuellement : `SUBSCRIPTION_AUTOMATIC_CREDIT_RENEWAL_ENABLED=true` puis `subscriptions:renew-with-credit`.
+2. Décider séparément d’un cron (ex. daily) — **ne pas** fusionner avec `subscriptions:sync-lifecycle`.
+3. Le lifecycle reste responsable des **statuts** ; cette commande des **mois prépayés**.
+
+**Le renouvellement automatique reste désactivé tant que `SUBSCRIPTION_AUTOMATIC_CREDIT_RENEWAL_ENABLED=false`.**
+
+---
+
+## Observabilité opérationnelle — renouvellement par crédit (Task 276)
+
+### Résumé CLI (`subscriptions:renew-with-credit`)
+
+| Situation | Code sortie | Résumé |
+|-----------|-------------|--------|
+| `enabled=false` | **0** | Fonctionnalité désactivée — aucun abonnement évalué |
+| Exécution normale | **0** | Évalués, renouvelés, ignorés (non éligibles), refusés (moteur), erreurs techniques, **durée ms** |
+| ≥1 erreur technique | **≠ 0** | Idem + journalisation |
+
+Les **non éligibles** affichent un détail par motif (`no_consumable_credit`, etc.). Ce ne sont **pas** des erreurs techniques.
+
+### Non-éligibilité vs erreur
+
+- **Non-éligible** : pas de crédit, moteur refusant après éligibilité (`rejected`), ou hors périmètre de requête (période encore valide, `terminated` non parcouru).
+- **Erreur technique** : exception non gérée — log `error` avec `subscription_id` et `exception`, traitement des autres abonnements poursuivi.
+
+### Audits et logs (pas d’audit d’exécution global)
+
+- **Consommation réussie** : `subscription.credit_consumed` + `renewal_trigger: automatic_credit_renewal` (inchangé).
+- **Pas** d’événement `subscription.automatic_renewal_run` : le résumé CLI + log `info` structuré (`subscriptions:renew-with-credit — exécution terminée`) suffisent sans table supplémentaire.
+
+### Traçabilité
+
+`Payment` → `SubscriptionPaymentConsumption` (période, `consumed_at`) → audit `subscription.credit_consumed` (trigger automatique). Aucun Payment créé ; `Subscription.amount` / `offer_version_id` / tarif catalogue **non** recalculés.
+
+---
+
+## Mode dry-run — renouvellement par crédit (Task 277)
+
+### Syntaxe
+
+```bash
+php artisan subscriptions:renew-with-credit --dry-run   # simulation
+php artisan subscriptions:renew-with-credit           # exécution réelle (si enabled)
+```
+
+### Interaction avec `enabled`
+
+| Config | Option | Effet |
+|--------|--------|--------|
+| `false` | *(aucune)* | Sortie immédiate, aucune consommation |
+| `false` | `--dry-run` | Toujours **désactivé** — message dry-run demandé, **aucune simulation** (le dry-run n’est pas une activation) |
+| `true` | `--dry-run` | Parcours complet **lecture seule** : `assessEligibility()` + `previewNextFifoCreditConsumption()` — **aucune** écriture |
+| `true` | *(réel)* | Comportement Task 274–276 inchangé |
+
+### Non-mutation
+
+Le dry-run **n’appelle pas** `performCreditConsumption()` / `consumeNextCreditForSubscription()`. Pas de rollback comme mécanisme principal. Aucun `subscription.credit_consumed`.
+
+### Utilisation avant activation production
+
+Après validation : `SUBSCRIPTION_AUTOMATIC_CREDIT_RENEWAL_ENABLED=true` en préproduction, puis `--dry-run` pour observer Payment FIFO simulé, période suivante et motifs d’ignorance — sans modifier les données. Le scheduler **ne** passe **pas** `--dry-run` (exécution manuelle de validation uniquement).
+
+---
+
+## Validation préproduction — activation contrôlée (Task 278)
+
+Activation **`SUBSCRIPTION_AUTOMATIC_CREDIT_RENEWAL_ENABLED=true`** uniquement sur environnement **non production** et base **isolée**. Le dépôt conserve **`false`**.
+
+Procédure détaillée : `docs/operations/automatic-credit-renewal-preprod-validation.md`.
+
+Suite de référence technique : `SubscriptionAutomaticCreditRenewalPreprodValidationTest` (scénarios A–G, dry-run puis run réel, idempotence, traçabilité, scheduler).
+
+**Ne pas** consommer du crédit sur la production client réelle dans le cadre de cette tâche.
+
+---
+
+## Garde-fous avant activation production (Task 279)
+
+- **Désactivé par défaut** : `config('subscriptions.automatic_credit_renewal.enabled')` ← `SUBSCRIPTION_AUTOMATIC_CREDIT_RENEWAL_ENABLED` (dépôt = `false`).
+- **Diagnostic lecture seule** : `php artisan subscriptions:automatic-renewal-status` (environnement, timezone, ENABLED/DISABLED, scheduler, dry-run).
+- **Dry-run** : `subscriptions:renew-with-credit --dry-run` (simulation non mutative).
+- **Scheduler** : appelle `subscriptions:renew-with-credit` (sans `--dry-run`) ; consommation toujours via `consumeNextCreditForSubscription()` → `performCreditConsumption()`.
+- **Production + activé** : avertissement CLI explicite sur `renew-with-credit` (n’empêche pas une activation volontaire).
+- **Rollback** : remettre `SUBSCRIPTION_AUTOMATIC_CREDIT_RENEWAL_ENABLED=false` — stoppe les futures consommations auto, **sans** annuler l’historique déjà consommé.
+
+Procédure détaillée : `docs/operations/automatic-credit-renewal-preprod-validation.md`.
+
+---
+
+## Audit read-only — renouvellement par crédit (Task 280)
+
+Quatre mécanismes **séparés** :
+
+| Mécanisme | Commande | Effet |
+|-----------|----------|--------|
+| Configuration | `subscriptions:automatic-renewal-status` | Diagnostic ENABLED/DISABLED |
+| Audit | `subscriptions:automatic-renewal-audit` | Lecture seule, éligibilité via `assessEligibility()` |
+| Simulation | `subscriptions:renew-with-credit --dry-run` | Aperçu FIFO + période simulée, sans écriture |
+| Mutation | `subscriptions:renew-with-credit` | Consommation réelle (si enabled) |
+
+L’audit ne remplace pas le dry-run et ne consomme jamais de crédit.
+
+---
+
+---
+
 ## Références code (lecture seule)
 
 | Composant | Fichier |
