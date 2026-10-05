@@ -9,24 +9,23 @@ use App\Models\Payment;
 use App\Models\Subscription;
 use App\Models\SubscriptionPaymentConsumption;
 use App\Models\User;
-use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\Concerns\BuildsSubscriptionStorePayload;
 use Tests\TestCase;
 
 class SubscriptionAuditTest extends TestCase
 {
+    use BuildsSubscriptionStorePayload;
     use RefreshDatabase;
 
     public function test_subscription_creation_is_audited(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
 
-        $payload = [
-            'installation_id' => $installation->id,
-            'starts_at' => '2026-10-01 00:00:00',
+        $payload = $this->subscriptionStorePayload($installation->id, [
             'notes' => 'Abonnement initial',
-        ];
+        ]);
 
         $response = $this->actingAs($user)->post(route('subscriptions.store'), $payload);
 
@@ -48,11 +47,13 @@ class SubscriptionAuditTest extends TestCase
         $this->assertSame('2026-10-01 00:00:00', $log->new_values['starts_at']);
         $this->assertSame('2026-10-01 00:00:00', $log->new_values['current_period_start']);
         $this->assertSame('2026-10-31 23:59:59', $log->new_values['current_period_end']);
+        $this->assertSame($subscription->offer_version_id, $log->new_values['offer_version_id']);
+        $this->assertArrayHasKey('offer_version_code', $log->new_values);
     }
 
     public function test_subscription_update_is_audited(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
 
         $subscription = Subscription::query()->create([
@@ -93,7 +94,7 @@ class SubscriptionAuditTest extends TestCase
 
     public function test_subscription_status_change_does_not_modify_installation(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
 
         $installation = Installation::query()->create([
             'client_id' => $this->makeClient()->id,
@@ -133,7 +134,7 @@ class SubscriptionAuditTest extends TestCase
 
     public function test_destroy_subscription_with_unconsumed_payment_is_blocked_by_foreign_key(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
 
         $subscription = Subscription::query()->create([
@@ -152,7 +153,7 @@ class SubscriptionAuditTest extends TestCase
 
     public function test_destroy_subscription_with_consumed_payment_is_blocked_by_foreign_key(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
 
         $subscription = Subscription::query()->create([
@@ -177,7 +178,7 @@ class SubscriptionAuditTest extends TestCase
 
     public function test_destroy_terminated_subscription_with_payment_is_blocked_by_foreign_key(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
 
         $subscription = Subscription::query()->create([
@@ -195,7 +196,7 @@ class SubscriptionAuditTest extends TestCase
 
     public function test_subscription_deletion_is_audited_without_polymorphic_reference(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
 
         $subscription = Subscription::query()->create([
@@ -225,7 +226,7 @@ class SubscriptionAuditTest extends TestCase
 
     public function test_subscription_index_and_show_do_not_create_audit_logs(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
 
         $subscription = Subscription::query()->create([
@@ -305,14 +306,10 @@ class SubscriptionAuditTest extends TestCase
 
         $this->assertGreaterThan(0, $paymentCount);
 
-        $this->withoutExceptionHandling();
-
-        try {
-            $this->actingAs($user)->delete(route('subscriptions.destroy', $subscription));
-            $this->fail('Expected subscription deletion to be blocked by payments foreign key (QueryException).');
-        } catch (QueryException $exception) {
-            $this->assertNotSame('', trim($exception->getMessage()));
-        }
+        $this->actingAs($user)
+            ->delete(route('subscriptions.destroy', $subscription))
+            ->assertRedirect(route('subscriptions.show', $subscription))
+            ->assertSessionHas('error');
 
         $this->assertDatabaseHas('subscriptions', ['id' => $subscriptionId]);
         $this->assertDatabaseHas('installations', ['id' => $installationId]);

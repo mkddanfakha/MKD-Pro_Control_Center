@@ -7,27 +7,28 @@ use App\Models\AuditLog;
 use App\Models\Client;
 use App\Models\Installation;
 use App\Models\Subscription;
+use App\Models\SubscriptionOfferSnapshot;
 use App\Http\Controllers\SubscriptionController;
-use App\Models\User;
 use App\Services\AuditLogService;
+use App\Services\Commercial\CommercialSubscriptionService;
 use App\Services\SubscriptionService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\Concerns\BuildsSubscriptionStorePayload;
 use Tests\TestCase;
 
 class SubscriptionStoreTest extends TestCase
 {
+    use BuildsSubscriptionStorePayload;
     use RefreshDatabase;
 
     public function test_store_creates_active_subscription_with_initial_period_from_starts_at(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
 
-        $response = $this->actingAs($user)->post(route('subscriptions.store'), [
-            'installation_id' => $installation->id,
-            'starts_at' => '2026-10-01 00:00:00',
+        $response = $this->actingAs($user)->post(route('subscriptions.store'), $this->subscriptionStorePayload($installation->id, [
             'notes' => 'Abonnement initial',
-        ]);
+        ]));
 
         $response->assertRedirect();
 
@@ -44,19 +45,18 @@ class SubscriptionStoreTest extends TestCase
         $this->assertSame('2026-10-01 00:00:00', $log->new_values['starts_at']);
         $this->assertSame('2026-10-01 00:00:00', $log->new_values['current_period_start']);
         $this->assertSame('2026-10-31 23:59:59', $log->new_values['current_period_end']);
-        $this->assertSame((int) config('subscriptions.default_monthly_amount'), (int) $subscription->amount);
+        $this->assertSame(15000, (int) $subscription->amount);
+        $this->assertNotNull($subscription->offer_version_id);
     }
 
     public function test_store_uses_explicit_amount_when_provided_instead_of_default(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
 
-        $response = $this->actingAs($user)->post(route('subscriptions.store'), [
-            'installation_id' => $installation->id,
-            'starts_at' => '2026-10-01 00:00:00',
+        $response = $this->actingAs($user)->post(route('subscriptions.store'), $this->subscriptionStorePayload($installation->id, [
             'amount' => 20000,
-        ]);
+        ]));
 
         $response->assertRedirect();
 
@@ -67,11 +67,12 @@ class SubscriptionStoreTest extends TestCase
 
     public function test_store_rejects_creation_without_starts_at(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
 
         $response = $this->actingAs($user)->post(route('subscriptions.store'), [
             'installation_id' => $installation->id,
+            'offer_version_id' => $this->seedActiveCatalogOfferVersion()->id,
         ]);
 
         $response->assertSessionHasErrors('starts_at');
@@ -82,14 +83,12 @@ class SubscriptionStoreTest extends TestCase
 
     public function test_store_forces_active_status_when_grace_period_is_sent(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
 
-        $response = $this->actingAs($user)->post(route('subscriptions.store'), [
-            'installation_id' => $installation->id,
-            'starts_at' => '2026-10-01 00:00:00',
+        $response = $this->actingAs($user)->post(route('subscriptions.store'), $this->subscriptionStorePayload($installation->id, [
             'status' => Subscription::STATUS_GRACE_PERIOD,
-        ]);
+        ]));
 
         $response->assertRedirect();
 
@@ -100,14 +99,12 @@ class SubscriptionStoreTest extends TestCase
 
     public function test_store_forces_active_status_when_suspended_is_sent(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
 
-        $response = $this->actingAs($user)->post(route('subscriptions.store'), [
-            'installation_id' => $installation->id,
-            'starts_at' => '2026-10-01 00:00:00',
+        $response = $this->actingAs($user)->post(route('subscriptions.store'), $this->subscriptionStorePayload($installation->id, [
             'status' => Subscription::STATUS_SUSPENDED,
-        ]);
+        ]));
 
         $response->assertRedirect();
 
@@ -118,14 +115,12 @@ class SubscriptionStoreTest extends TestCase
 
     public function test_store_forces_active_status_when_terminated_is_sent(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
 
-        $response = $this->actingAs($user)->post(route('subscriptions.store'), [
-            'installation_id' => $installation->id,
-            'starts_at' => '2026-10-01 00:00:00',
+        $response = $this->actingAs($user)->post(route('subscriptions.store'), $this->subscriptionStorePayload($installation->id, [
             'status' => Subscription::STATUS_TERMINATED,
-        ]);
+        ]));
 
         $response->assertRedirect();
 
@@ -136,15 +131,14 @@ class SubscriptionStoreTest extends TestCase
 
     public function test_store_ignores_manual_period_fields_and_uses_create_initial_period(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
 
-        $response = $this->actingAs($user)->post(route('subscriptions.store'), [
-            'installation_id' => $installation->id,
+        $response = $this->actingAs($user)->post(route('subscriptions.store'), $this->subscriptionStorePayload($installation->id, [
             'starts_at' => '2026-11-01 00:00:00',
             'current_period_start' => '2020-01-01 00:00:00',
             'current_period_end' => '2020-01-31 23:59:59',
-        ]);
+        ]));
 
         $response->assertRedirect();
 
@@ -156,13 +150,10 @@ class SubscriptionStoreTest extends TestCase
 
     public function test_store_allows_creation_when_installation_has_no_subscription(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
 
-        $response = $this->actingAs($user)->post(route('subscriptions.store'), [
-            'installation_id' => $installation->id,
-            'starts_at' => '2026-10-01 00:00:00',
-        ]);
+        $response = $this->actingAs($user)->post(route('subscriptions.store'), $this->subscriptionStorePayload($installation->id));
 
         $response->assertRedirect();
         $this->assertSame(1, Subscription::query()->where('installation_id', $installation->id)->count());
@@ -185,16 +176,13 @@ class SubscriptionStoreTest extends TestCase
 
     public function test_store_allows_creation_when_installation_has_only_terminated_subscription(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
         $this->makeExistingSubscription($installation, Subscription::STATUS_TERMINATED, [
             'terminated_at' => '2026-09-01 00:00:00',
         ]);
 
-        $response = $this->actingAs($user)->post(route('subscriptions.store'), [
-            'installation_id' => $installation->id,
-            'starts_at' => '2026-10-01 00:00:00',
-        ]);
+        $response = $this->actingAs($user)->post(route('subscriptions.store'), $this->subscriptionStorePayload($installation->id));
 
         $response->assertRedirect();
 
@@ -214,15 +202,12 @@ class SubscriptionStoreTest extends TestCase
 
     public function test_store_allows_creation_when_installation_has_multiple_terminated_subscriptions(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
         $this->makeExistingSubscription($installation, Subscription::STATUS_TERMINATED);
         $this->makeExistingSubscription($installation, Subscription::STATUS_TERMINATED);
 
-        $response = $this->actingAs($user)->post(route('subscriptions.store'), [
-            'installation_id' => $installation->id,
-            'starts_at' => '2026-10-01 00:00:00',
-        ]);
+        $response = $this->actingAs($user)->post(route('subscriptions.store'), $this->subscriptionStorePayload($installation->id));
 
         $response->assertRedirect();
         $this->assertSame(3, Subscription::query()->where('installation_id', $installation->id)->count());
@@ -231,15 +216,14 @@ class SubscriptionStoreTest extends TestCase
 
     public function test_store_rejects_creation_when_terminated_and_active_subscriptions_exist(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
         $this->makeExistingSubscription($installation, Subscription::STATUS_TERMINATED);
         $this->makeExistingSubscription($installation, Subscription::STATUS_ACTIVE);
 
-        $response = $this->actingAs($user)->post(route('subscriptions.store'), [
-            'installation_id' => $installation->id,
+        $response = $this->actingAs($user)->post(route('subscriptions.store'), $this->subscriptionStorePayload($installation->id, [
             'starts_at' => '2026-12-01 00:00:00',
-        ]);
+        ]));
 
         $response->assertSessionHasErrors('installation_id');
         $this->assertSame(2, Subscription::query()->where('installation_id', $installation->id)->count());
@@ -248,7 +232,7 @@ class SubscriptionStoreTest extends TestCase
 
     public function test_store_rolls_back_subscription_and_audit_when_initial_period_fails(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
 
         $this->mock(SubscriptionService::class, function ($mock): void {
@@ -260,10 +244,7 @@ class SubscriptionStoreTest extends TestCase
         try {
             $this->withoutExceptionHandling();
 
-            $this->actingAs($user)->post(route('subscriptions.store'), [
-                'installation_id' => $installation->id,
-                'starts_at' => '2026-10-01 00:00:00',
-            ]);
+            $this->actingAs($user)->post(route('subscriptions.store'), $this->subscriptionStorePayload($installation->id));
 
             $this->fail('Une SubscriptionPeriodException était attendue.');
         } catch (SubscriptionPeriodException) {
@@ -271,19 +252,25 @@ class SubscriptionStoreTest extends TestCase
         }
 
         $this->assertSame(0, Subscription::query()->count());
+        $this->assertSame(0, SubscriptionOfferSnapshot::query()->count());
         $this->assertSame(0, AuditLog::query()->count());
     }
 
     public function test_store_maps_unique_constraint_violation_to_installation_id_validation_error(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
         $this->makeExistingSubscription($installation, Subscription::STATUS_ACTIVE);
 
         $subscriptionCount = Subscription::query()->where('installation_id', $installation->id)->count();
         $auditCountBefore = AuditLog::query()->count();
 
-        $controller = new class(app(AuditLogService::class), app(SubscriptionService::class)) extends SubscriptionController
+        $controller = new class(
+            app(AuditLogService::class),
+            app(CommercialSubscriptionService::class),
+            app(\App\Services\ControlCenterDashboardStatisticsService::class),
+            app(SubscriptionService::class),
+        ) extends SubscriptionController
         {
             protected function assertInstallationAllowsNewSubscription(int $installationId): void
             {
@@ -293,10 +280,9 @@ class SubscriptionStoreTest extends TestCase
 
         $this->app->instance(SubscriptionController::class, $controller);
 
-        $response = $this->actingAs($user)->post(route('subscriptions.store'), [
-            'installation_id' => $installation->id,
+        $response = $this->actingAs($user)->post(route('subscriptions.store'), $this->subscriptionStorePayload($installation->id, [
             'starts_at' => '2026-12-01 00:00:00',
-        ]);
+        ]));
 
         $response->assertSessionHasErrors([
             'installation_id' => 'Cette installation possède déjà un abonnement non terminé.',
@@ -308,14 +294,13 @@ class SubscriptionStoreTest extends TestCase
 
     private function assertStoreRejectsWhenNonTerminatedSubscriptionExists(string $status): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
         $installation = $this->makeInstallation();
         $this->makeExistingSubscription($installation, $status);
 
-        $response = $this->actingAs($user)->post(route('subscriptions.store'), [
-            'installation_id' => $installation->id,
+        $response = $this->actingAs($user)->post(route('subscriptions.store'), $this->subscriptionStorePayload($installation->id, [
             'starts_at' => '2026-12-01 00:00:00',
-        ]);
+        ]));
 
         $response->assertSessionHasErrors([
             'installation_id' => 'Cette installation possède déjà un abonnement non terminé.',
