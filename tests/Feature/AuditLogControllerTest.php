@@ -7,6 +7,7 @@ use App\Models\Client;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
@@ -17,7 +18,7 @@ class AuditLogControllerTest extends TestCase
 
     public function test_authenticated_user_can_view_audit_logs_index(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
 
         $this->makeAuditLog(['action' => 'client.created']);
 
@@ -36,9 +37,20 @@ class AuditLogControllerTest extends TestCase
             ->assertRedirect(route('login'));
     }
 
+    public function test_user_without_control_center_access_receives_forbidden(): void
+    {
+        Gate::before(fn ($user, string $ability) => $ability === 'accessControlCenter' ? false : null);
+
+        $user = User::factory()->create();
+
+        $this->actingAs($user)
+            ->get(route('audit-logs.index'))
+            ->assertForbidden();
+    }
+
     public function test_audit_logs_are_ordered_newest_first(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
 
         $older = $this->makeAuditLog([
             'action' => 'client.created',
@@ -60,7 +72,7 @@ class AuditLogControllerTest extends TestCase
 
     public function test_audit_logs_are_paginated(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
 
         for ($i = 0; $i < 26; $i++) {
             $this->makeAuditLog([
@@ -85,7 +97,7 @@ class AuditLogControllerTest extends TestCase
 
     public function test_filter_by_action(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
 
         $this->makeAuditLog(['action' => 'client.created']);
         $this->makeAuditLog(['action' => 'payment.created']);
@@ -101,7 +113,7 @@ class AuditLogControllerTest extends TestCase
 
     public function test_filter_by_result(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
 
         $this->makeAuditLog(['action' => 'auth.login', 'result' => 'success']);
         $this->makeAuditLog(['action' => 'auth.login_failed', 'result' => 'failure']);
@@ -117,24 +129,25 @@ class AuditLogControllerTest extends TestCase
 
     public function test_filter_by_user_id(): void
     {
-        $user = User::factory()->create();
+        $admin = $this->controlCenterAdminUser();
+        $user = $this->controlCenterAdminUser();
         $other = User::factory()->create();
 
         $this->makeAuditLog(['action' => 'client.created', 'user_id' => $user->id]);
         $this->makeAuditLog(['action' => 'client.created', 'user_id' => $other->id]);
 
-        $this->actingAs($user)
+        $this->actingAs($admin)
             ->get(route('audit-logs.index', ['user_id' => $user->id]))
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
                 ->where('filters.user_id', $user->id)
                 ->has('auditLogs.data', 1)
-                ->where('auditLogs.data.0.user_id', $user->id));
+                ->where('auditLogs.data.0.user.id', $user->id));
     }
 
     public function test_filter_by_auditable_type(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
 
         $this->makeAuditLog([
             'action' => 'client.created',
@@ -158,7 +171,7 @@ class AuditLogControllerTest extends TestCase
 
     public function test_filter_by_date_from(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
 
         $this->makeAuditLog([
             'action' => 'client.created',
@@ -180,7 +193,7 @@ class AuditLogControllerTest extends TestCase
 
     public function test_filter_by_date_to(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
 
         $this->makeAuditLog([
             'action' => 'client.created',
@@ -202,7 +215,7 @@ class AuditLogControllerTest extends TestCase
 
     public function test_multiple_filters_can_be_combined(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
 
         $this->makeAuditLog([
             'action' => 'client.created',
@@ -240,7 +253,7 @@ class AuditLogControllerTest extends TestCase
 
     public function test_old_and_new_values_are_included_in_response(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
 
         $this->makeAuditLog([
             'action' => 'client.updated',
@@ -252,13 +265,13 @@ class AuditLogControllerTest extends TestCase
             ->get(route('audit-logs.index'))
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
-                ->where('auditLogs.data.0.old_values.name', 'Avant')
-                ->where('auditLogs.data.0.new_values.name', 'Après'));
+                ->where('auditLogs.data.0.detail.old_values.name', 'Avant')
+                ->where('auditLogs.data.0.detail.new_values.name', 'Après'));
     }
 
     public function test_viewing_audit_logs_does_not_modify_records(): void
     {
-        $user = User::factory()->create();
+        $user = $this->controlCenterAdminUser();
 
         $log = $this->makeAuditLog([
             'action' => 'installation.created',

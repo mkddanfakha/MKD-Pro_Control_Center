@@ -111,6 +111,7 @@ export const ADMIN_EMPTY_STATE_MESSAGES = {
     installations: 'Aucune installation ne correspond aux critères.',
     modules: 'Aucun module enregistré.',
     installationModules: 'Aucune affectation de module pour le moment.',
+    auditLogs: 'Aucun événement d’audit ne correspond aux critères.',
 };
 export function moduleCatalogStatusLabel(status) {
     const labels = {

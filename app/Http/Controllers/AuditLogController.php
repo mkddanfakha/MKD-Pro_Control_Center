@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\AuditLog;
+use App\Support\AuditLogAdminPresentation;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -17,8 +18,10 @@ class AuditLogController extends Controller
             'result' => 'nullable|in:success,failure',
             'user_id' => 'nullable|integer|min:1',
             'auditable_type' => 'nullable|string|max:255',
+            'auditable_id' => 'nullable|integer|min:1',
             'date_from' => 'nullable|date_format:Y-m-d',
             'date_to' => 'nullable|date_format:Y-m-d',
+            'search' => 'nullable|string|max:255',
         ]);
 
         $query = AuditLog::query()
@@ -39,7 +42,12 @@ class AuditLogController extends Controller
         }
 
         if (filled($validated['auditable_type'] ?? null)) {
-            $query->where('auditable_type', $validated['auditable_type']);
+            $resolvedType = AuditLogAdminPresentation::resolveAuditableTypeFilter($validated['auditable_type']);
+            $query->where('auditable_type', $resolvedType);
+        }
+
+        if (filled($validated['auditable_id'] ?? null)) {
+            $query->where('auditable_id', $validated['auditable_id']);
         }
 
         if (filled($validated['date_from'] ?? null)) {
@@ -58,15 +66,32 @@ class AuditLogController extends Controller
             );
         }
 
+        if (filled($validated['search'] ?? null)) {
+            $term = '%'.$validated['search'].'%';
+            $query->where(function ($inner) use ($term): void {
+                $inner->where('action', 'like', $term)
+                    ->orWhere('error_message', 'like', $term);
+            });
+        }
+
+        $paginator = $query->paginate(25)->withQueryString();
+        $subjectContext = AuditLogAdminPresentation::buildSubjectContext($paginator->getCollection());
+
+        $paginator->through(
+            fn (AuditLog $log): array => AuditLogAdminPresentation::serializeEntry($log, $subjectContext),
+        );
+
         return Inertia::render('AuditLogs/Index', [
-            'auditLogs' => $query->paginate(25)->withQueryString(),
+            'auditLogs' => $paginator,
             'filters' => [
                 'action' => $validated['action'] ?? null,
                 'result' => $validated['result'] ?? null,
                 'user_id' => isset($validated['user_id']) ? (int) $validated['user_id'] : null,
                 'auditable_type' => $validated['auditable_type'] ?? null,
+                'auditable_id' => isset($validated['auditable_id']) ? (int) $validated['auditable_id'] : null,
                 'date_from' => $validated['date_from'] ?? null,
                 'date_to' => $validated['date_to'] ?? null,
+                'search' => $validated['search'] ?? null,
             ],
         ]);
     }

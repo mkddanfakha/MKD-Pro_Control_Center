@@ -1,7 +1,15 @@
 <script setup>
 import AdminLayout from '@/Layouts/AdminLayout.vue';
-import { Head, router } from '@inertiajs/vue3';
+import { useAdminUrls } from '@/lib/adminNavigation.js';
+import {
+    ADMIN_EMPTY_STATE_MESSAGES,
+    formatAdminDateTimeUtc,
+} from '@/lib/adminPresentation.js';
+import { Head, Link, router } from '@inertiajs/vue3';
 import { reactive, ref } from 'vue';
+
+const adminUrls = useAdminUrls();
+const auditLogsIndexUrl = adminUrls.audit_logs_index ?? '/audit-logs';
 
 const props = defineProps({
     auditLogs: {
@@ -21,20 +29,13 @@ const filterForm = reactive({
     result: props.filters.result ?? '',
     user_id: props.filters.user_id ?? '',
     auditable_type: props.filters.auditable_type ?? '',
+    auditable_id: props.filters.auditable_id ?? '',
     date_from: props.filters.date_from ?? '',
     date_to: props.filters.date_to ?? '',
+    search: props.filters.search ?? '',
 });
 
-function formatDateTime(value) {
-    if (!value) {
-        return '—';
-    }
-
-    return new Intl.DateTimeFormat('fr-FR', {
-        dateStyle: 'medium',
-        timeStyle: 'short',
-    }).format(new Date(value));
-}
+const emptyStateMessage = ADMIN_EMPTY_STATE_MESSAGES.auditLogs;
 
 function userLabel(user) {
     if (!user) {
@@ -52,24 +53,8 @@ function userLabel(user) {
     return 'Système';
 }
 
-function formatAuditableType(type) {
-    if (!type || String(type).trim() === '') {
-        return '—';
-    }
-
-    const normalized = String(type);
-
-    if (normalized.includes('\\')) {
-        const parts = normalized.split('\\');
-
-        return parts[parts.length - 1];
-    }
-
-    return normalized;
-}
-
 function auditableObjectLabel(log) {
-    const typeLabel = formatAuditableType(log.auditable_type);
+    const typeLabel = log.auditable_type_label ?? '—';
 
     if (log.auditable_id === null || log.auditable_id === undefined) {
         return typeLabel;
@@ -141,6 +126,14 @@ function buildFilterParams() {
         params.auditable_type = filterForm.auditable_type.trim();
     }
 
+    if (filterForm.auditable_id !== '' && filterForm.auditable_id !== null) {
+        params.auditable_id = filterForm.auditable_id;
+    }
+
+    if (filterForm.search.trim() !== '') {
+        params.search = filterForm.search.trim();
+    }
+
     if (filterForm.date_from !== '') {
         params.date_from = filterForm.date_from;
     }
@@ -153,7 +146,7 @@ function buildFilterParams() {
 }
 
 function applyFilters() {
-    router.get('/audit-logs', buildFilterParams(), {
+    router.get(auditLogsIndexUrl, buildFilterParams(), {
         preserveState: true,
         preserveScroll: true,
     });
@@ -164,10 +157,12 @@ function resetFilters() {
     filterForm.result = '';
     filterForm.user_id = '';
     filterForm.auditable_type = '';
+    filterForm.auditable_id = '';
     filterForm.date_from = '';
     filterForm.date_to = '';
+    filterForm.search = '';
 
-    router.get('/audit-logs', {}, {
+    router.get(auditLogsIndexUrl, {}, {
         preserveState: true,
         preserveScroll: true,
     });
@@ -276,7 +271,7 @@ function displayValue(value) {
                                 Date
                             </dt>
                             <dd class="mt-1 text-sm text-gray-900">
-                                {{ formatDateTime(selectedLog.created_at) }}
+                                {{ formatAdminDateTimeUtc(selectedLog.created_at) }}
                             </dd>
                         </div>
 
@@ -323,10 +318,19 @@ function displayValue(value) {
 
                         <div class="sm:col-span-2">
                             <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                Contexte
+                            </dt>
+                            <dd class="mt-1 text-sm text-gray-900">
+                                {{ displayValue(selectedLog.context_summary) }}
+                            </dd>
+                        </div>
+
+                        <div class="sm:col-span-2">
+                            <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
                                 Adresse IP
                             </dt>
                             <dd class="mt-1 text-sm text-gray-900">
-                                {{ displayValue(selectedLog.ip_address) }}
+                                {{ displayValue(selectedLog.detail?.ip_address) }}
                             </dd>
                         </div>
 
@@ -335,19 +339,19 @@ function displayValue(value) {
                                 User-Agent
                             </dt>
                             <dd class="mt-1 break-all text-sm text-gray-900">
-                                {{ displayValue(selectedLog.user_agent) }}
+                                {{ displayValue(selectedLog.detail?.user_agent) }}
                             </dd>
                         </div>
 
                         <div
-                            v-if="selectedLog.error_message"
+                            v-if="selectedLog.detail?.error_message"
                             class="sm:col-span-2"
                         >
                             <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
                                 Message d'erreur
                             </dt>
                             <dd class="mt-1 break-all text-sm text-red-800">
-                                {{ selectedLog.error_message }}
+                                {{ selectedLog.detail.error_message }}
                             </dd>
                         </div>
                             </dl>
@@ -357,14 +361,14 @@ function displayValue(value) {
                                     <h3 class="text-sm font-semibold text-gray-900">
                                         Anciennes valeurs
                                     </h3>
-                                    <pre class="mt-2 max-h-48 overflow-auto rounded-lg bg-gray-50 p-4 text-xs text-gray-800 ring-1 ring-gray-200">{{ formatJsonBlock(selectedLog.old_values) }}</pre>
+                                    <pre class="mt-2 max-h-48 overflow-auto rounded-lg bg-gray-50 p-4 text-xs text-gray-800 ring-1 ring-gray-200">{{ formatJsonBlock(selectedLog.detail?.old_values) }}</pre>
                                 </div>
 
                                 <div>
                                     <h3 class="text-sm font-semibold text-gray-900">
                                         Nouvelles valeurs
                                     </h3>
-                                    <pre class="mt-2 max-h-48 overflow-auto rounded-lg bg-gray-50 p-4 text-xs text-gray-800 ring-1 ring-gray-200">{{ formatJsonBlock(selectedLog.new_values) }}</pre>
+                                    <pre class="mt-2 max-h-48 overflow-auto rounded-lg bg-gray-50 p-4 text-xs text-gray-800 ring-1 ring-gray-200">{{ formatJsonBlock(selectedLog.detail?.new_values) }}</pre>
                                 </div>
                             </div>
                         </div>
@@ -469,7 +473,42 @@ function displayValue(value) {
                             type="text"
                             autocomplete="off"
                             class="mt-2 block w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-900 shadow-sm outline-none transition focus:border-gray-900 focus:ring-2 focus:ring-gray-200"
-                            placeholder="App\Models\Client"
+                            placeholder="Subscription ou App\Models\Client"
+                        >
+                    </div>
+
+                    <div>
+                        <label
+                            for="filter-auditable-id"
+                            class="block text-sm font-medium text-gray-700"
+                        >
+                            ID objet
+                        </label>
+                        <input
+                            id="filter-auditable-id"
+                            v-model="filterForm.auditable_id"
+                            type="number"
+                            min="1"
+                            step="1"
+                            class="mt-2 block w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-900 shadow-sm outline-none transition focus:border-gray-900 focus:ring-2 focus:ring-gray-200"
+                            placeholder="Identifiant"
+                        >
+                    </div>
+
+                    <div>
+                        <label
+                            for="filter-search"
+                            class="block text-sm font-medium text-gray-700"
+                        >
+                            Recherche
+                        </label>
+                        <input
+                            id="filter-search"
+                            v-model="filterForm.search"
+                            type="search"
+                            autocomplete="off"
+                            class="mt-2 block w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-900 shadow-sm outline-none transition focus:border-gray-900 focus:ring-2 focus:ring-gray-200"
+                            placeholder="Action ou message d'erreur"
                         >
                     </div>
 
@@ -526,12 +565,8 @@ function displayValue(value) {
                 v-if="!auditLogs.data.length"
                 class="mt-8 rounded-xl border border-dashed border-gray-300 bg-white px-6 py-16 text-center shadow-sm"
             >
-                <h2 class="text-lg font-semibold text-gray-900">
-                    Aucun enregistrement
-                </h2>
-
-                <p class="mx-auto mt-2 max-w-md text-sm text-gray-500">
-                    Aucune entrée d'audit ne correspond aux critères sélectionnés.
+                <p class="mx-auto max-w-md text-sm text-gray-500">
+                    {{ emptyStateMessage }}
                 </p>
             </div>
 
@@ -544,6 +579,12 @@ function displayValue(value) {
                         <table class="min-w-full divide-y divide-gray-200 text-left text-sm">
                             <thead class="bg-gray-50">
                                 <tr>
+                                    <th
+                                        scope="col"
+                                        class="px-4 py-3 font-semibold text-gray-700 sm:px-6"
+                                    >
+                                        ID
+                                    </th>
                                     <th
                                         scope="col"
                                         class="px-4 py-3 font-semibold text-gray-700 sm:px-6"
@@ -570,6 +611,18 @@ function displayValue(value) {
                                     </th>
                                     <th
                                         scope="col"
+                                        class="hidden px-4 py-3 font-semibold text-gray-700 lg:table-cell sm:px-6"
+                                    >
+                                        Contexte
+                                    </th>
+                                    <th
+                                        scope="col"
+                                        class="hidden px-4 py-3 font-semibold text-gray-700 md:table-cell sm:px-6"
+                                    >
+                                        Lien
+                                    </th>
+                                    <th
+                                        scope="col"
                                         class="px-4 py-3 font-semibold text-gray-700 sm:px-6"
                                     >
                                         Résultat
@@ -587,8 +640,11 @@ function displayValue(value) {
                                     v-for="log in auditLogs.data"
                                     :key="log.id"
                                 >
+                                    <td class="whitespace-nowrap px-4 py-4 font-mono text-xs text-gray-600 sm:px-6">
+                                        {{ log.id }}
+                                    </td>
                                     <td class="whitespace-nowrap px-4 py-4 text-gray-700 sm:px-6">
-                                        {{ formatDateTime(log.created_at) }}
+                                        {{ formatAdminDateTimeUtc(log.created_at) }}
                                     </td>
                                     <td class="whitespace-nowrap px-4 py-4 text-gray-900 sm:px-6">
                                         {{ userLabel(log.user) }}
@@ -598,6 +654,24 @@ function displayValue(value) {
                                     </td>
                                     <td class="hidden max-w-xs truncate px-4 py-4 text-gray-600 md:table-cell sm:px-6">
                                         {{ auditableObjectLabel(log) }}
+                                    </td>
+                                    <td class="hidden max-w-xs truncate px-4 py-4 text-gray-600 lg:table-cell sm:px-6">
+                                        {{ displayValue(log.context_summary) }}
+                                    </td>
+                                    <td class="hidden max-w-[10rem] px-4 py-4 text-sm md:table-cell sm:px-6">
+                                        <Link
+                                            v-if="log.subject?.url"
+                                            :href="log.subject.url"
+                                            class="font-medium text-gray-900 underline-offset-2 hover:underline"
+                                        >
+                                            {{ log.subject.label }}
+                                        </Link>
+                                        <span
+                                            v-else
+                                            class="text-gray-500"
+                                        >
+                                            {{ log.subject?.label ?? '—' }}
+                                        </span>
                                     </td>
                                     <td class="whitespace-nowrap px-4 py-4 sm:px-6">
                                         <span
