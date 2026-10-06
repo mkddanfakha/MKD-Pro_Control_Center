@@ -36,6 +36,7 @@ Orchestrateur : `App\Services\Provisioning\ProvisioningInfrastructurePreflight`.
 | Clé | Classe | Capacité testée |
 |-----|--------|-----------------|
 | `cloudflare_dns` | `CloudflareDnsPreflightCheck` | `dns_zone_and_records_read` |
+| `o2switch_account` | `O2SwitchAccountPreflightCheck` | `account_read` |
 | `o2switch_database` | `O2SwitchDatabasePreflightCheck` | `mysql_list_databases` |
 | `o2switch_git` | `O2SwitchGitPreflightCheck` | `git_retrieve_read_only` |
 | `o2switch_fileman` | `O2SwitchFilemanPreflightCheck` | `fileman_get_file_content_read_only` |
@@ -61,6 +62,8 @@ Configuration requise : token + (`zone_id` ou `zone_name`).
 ## 5. o2switch cPanel
 
 Authentification : en-tête `Authorization: cpanel {username}:{api_token}` (lecture config uniquement, jamais loggé).
+
+**Account (TASK 3W) :** `GET …/execute/Variables/get_user_information` — identité compte, homedir et métadonnées non secrètes uniquement.
 
 **Database :** `GET …/execute/Mysql/list_databases`.
 
@@ -115,9 +118,11 @@ Filtrage : `ProvisioningSecretSanitizer` sur messages et diagnostics.
 
 Global : `ready` | `not_ready`.
 
-Global `ready` **uniquement** si les quatre services obligatoires sont `ready` :
+Global `ready` **uniquement** si les cinq services obligatoires sont `ready` :
 
-- `cloudflare_dns`, `o2switch_database`, `o2switch_git`, `o2switch_fileman`.
+- `cloudflare_dns`, `o2switch_account`, `o2switch_database`, `o2switch_git`, `o2switch_fileman`.
+
+Correspondance opérateur (TASK 3W) : `not_configured` → configuration manquante ; `authentication_failed` → credentials refusés ; `unreachable` → connexion/timeout ; `failed` → erreur inattendue.
 
 ---
 
@@ -132,7 +137,7 @@ Global `ready` **uniquement** si les quatre services obligatoires sont `ready` :
 
 ## 13. Non-destructive guarantees
 
-Aucun appel create/update/delete provisioning. Seuls GET (Cloudflare, UAPI list/retrieve/get_file_content) lorsque configuré.
+Aucun appel create/update/delete provisioning. Seuls GET (Cloudflare, UAPI Variables/get_user_information, Mysql/list_databases, Git/retrieve, Fileman/get_file_content) lorsque configuré.
 
 ---
 

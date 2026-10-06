@@ -24,16 +24,19 @@ final class ProvisioningInfrastructurePreflightCommand extends Command
         foreach ($report->checks as $check) {
             $enabled = $check->provisioningFeatureEnabled ? 'enabled' : 'disabled';
             $this->line(sprintf(
-                '%s → %s (%s, provisioning %s)',
+                '%s → %s (%s, capability %s, provisioning %s)',
                 $check->serviceLabel,
                 $check->state,
                 $check->code,
+                $check->capability,
                 $enabled,
             ));
         }
 
         $this->newLine();
         $this->line('Global readiness → '.$report->globalState);
+        $this->newLine();
+        $this->line('Read-only preflight: no mutating provisioning operation executed.');
 
         return $report->globalState === 'ready' ? self::SUCCESS : self::FAILURE;
     }

@@ -19,6 +19,8 @@ final class ProvisioningPreflightConfigStatusCommand extends Command
         $this->emitLine('PROVISIONING_O2SWITCH_API_TOKEN', config('provisioning.secrets.o2switch_api_token'));
         $this->emitLine('PROVISIONING_O2SWITCH_CPANEL_USERNAME', config('provisioning.secrets.o2switch_cpanel_username'));
         $this->emitLine('PROVISIONING_O2SWITCH_CPANEL_HOST', config('provisioning.o2switch.database.cpanel_host'));
+        $timeout = config('provisioning.preflight.http_timeout_seconds');
+        $this->line('PROVISIONING_PREFLIGHT_HTTP_TIMEOUT='.($timeout > 0 ? 'CONFIGURED' : 'MISSING'));
         $this->emitLine('PROVISIONING_CLOUDFLARE_ZONE_ID', config('provisioning.cloudflare.dns.zone_id'));
         $this->emitLine('PROVISIONING_CLOUDFLARE_ZONE_NAME', config('provisioning.cloudflare.dns.zone_name'));
         $this->emitLine('PROVISIONING_PREFLIGHT_GIT_PROBE_ROOT', config('provisioning.preflight.git_probe_root'));

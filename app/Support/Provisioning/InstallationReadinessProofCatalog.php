@@ -34,6 +34,8 @@ final class InstallationReadinessProofCatalog
 
     public const CODE_INFRASTRUCTURE_CLOUDFLARE_DNS_VERIFIED = 'infrastructure_cloudflare_dns_verified';
 
+    public const CODE_INFRASTRUCTURE_O2SWITCH_ACCOUNT_VERIFIED = 'infrastructure_o2switch_account_verified';
+
     public const CODE_INFRASTRUCTURE_O2SWITCH_DATABASE_VERIFIED = 'infrastructure_o2switch_database_verified';
 
     public const CODE_INFRASTRUCTURE_O2SWITCH_GIT_VERIFIED = 'infrastructure_o2switch_git_verified';
@@ -131,6 +133,7 @@ final class InstallationReadinessProofCatalog
             self::CODE_CLOUDFLARE_ZONE_CONFIGURATION_PRESENT => self::def(self::DOMAIN_CONTROL_CENTER_CONFIG, InstallationReadinessProofLevel::OPTIONAL, true, false),
 
             self::CODE_INFRASTRUCTURE_CLOUDFLARE_DNS_VERIFIED => self::def(self::DOMAIN_INFRASTRUCTURE, InstallationReadinessProofLevel::RECOMMENDED, true, false),
+            self::CODE_INFRASTRUCTURE_O2SWITCH_ACCOUNT_VERIFIED => self::def(self::DOMAIN_INFRASTRUCTURE, InstallationReadinessProofLevel::RECOMMENDED, true, false),
             self::CODE_INFRASTRUCTURE_O2SWITCH_DATABASE_VERIFIED => self::def(self::DOMAIN_INFRASTRUCTURE, InstallationReadinessProofLevel::RECOMMENDED, true, false),
             self::CODE_INFRASTRUCTURE_O2SWITCH_GIT_VERIFIED => self::def(self::DOMAIN_INFRASTRUCTURE, InstallationReadinessProofLevel::RECOMMENDED, true, false),
             self::CODE_INFRASTRUCTURE_O2SWITCH_FILEMAN_VERIFIED => self::def(self::DOMAIN_INFRASTRUCTURE, InstallationReadinessProofLevel::RECOMMENDED, true, false),
@@ -198,6 +201,7 @@ final class InstallationReadinessProofCatalog
             self::CODE_INSTALLATION_DATABASE_CONFIGURATION_PRESENT,
             self::CODE_PROVISIONING_CONFIGURATION_LOADED,
             self::CODE_INFRASTRUCTURE_CLOUDFLARE_DNS_VERIFIED,
+            self::CODE_INFRASTRUCTURE_O2SWITCH_ACCOUNT_VERIFIED,
             self::CODE_INFRASTRUCTURE_O2SWITCH_DATABASE_VERIFIED,
             self::CODE_INFRASTRUCTURE_O2SWITCH_GIT_VERIFIED,
             self::CODE_INFRASTRUCTURE_O2SWITCH_FILEMAN_VERIFIED,
@@ -227,6 +231,7 @@ final class InstallationReadinessProofCatalog
     {
         return [
             'cloudflare_dns',
+            'o2switch_account',
             'o2switch_database',
             'o2switch_git',
             'o2switch_fileman',
@@ -237,6 +242,7 @@ final class InstallationReadinessProofCatalog
     {
         return match ($serviceKey) {
             'cloudflare_dns' => self::CODE_INFRASTRUCTURE_CLOUDFLARE_DNS_VERIFIED,
+            'o2switch_account' => self::CODE_INFRASTRUCTURE_O2SWITCH_ACCOUNT_VERIFIED,
             'o2switch_database' => self::CODE_INFRASTRUCTURE_O2SWITCH_DATABASE_VERIFIED,
             'o2switch_git' => self::CODE_INFRASTRUCTURE_O2SWITCH_GIT_VERIFIED,
             'o2switch_fileman' => self::CODE_INFRASTRUCTURE_O2SWITCH_FILEMAN_VERIFIED,

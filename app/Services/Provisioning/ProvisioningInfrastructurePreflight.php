@@ -5,6 +5,7 @@ namespace App\Services\Provisioning;
 use App\Contracts\Provisioning\Infrastructure\InfrastructurePreflightCheck;
 use App\DTO\Provisioning\InfrastructurePreflightReport;
 use App\Services\Provisioning\Infrastructure\Preflight\CloudflareDnsPreflightCheck;
+use App\Services\Provisioning\Infrastructure\Preflight\O2SwitchAccountPreflightCheck;
 use App\Services\Provisioning\Infrastructure\Preflight\O2SwitchDatabasePreflightCheck;
 use App\Services\Provisioning\Infrastructure\Preflight\O2SwitchFilemanPreflightCheck;
 use App\Services\Provisioning\Infrastructure\Preflight\O2SwitchGitPreflightCheck;
@@ -20,6 +21,7 @@ final class ProvisioningInfrastructurePreflight
      */
     public const MANDATORY_SERVICE_KEYS = [
         CloudflareDnsPreflightCheck::SERVICE_KEY,
+        O2SwitchAccountPreflightCheck::SERVICE_KEY,
         O2SwitchDatabasePreflightCheck::SERVICE_KEY,
         O2SwitchGitPreflightCheck::SERVICE_KEY,
         O2SwitchFilemanPreflightCheck::SERVICE_KEY,

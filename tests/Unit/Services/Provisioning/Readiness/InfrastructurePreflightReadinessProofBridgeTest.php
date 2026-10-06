@@ -50,6 +50,7 @@ class InfrastructurePreflightReadinessProofBridgeTest extends TestCase
     {
         return [
             $this->check('cloudflare_dns', InfrastructurePreflightState::NOT_CONFIGURED, 'cloudflare_dns_token_missing'),
+            $this->check('o2switch_account', InfrastructurePreflightState::NOT_CONFIGURED, 'o2switch_account_host_missing'),
             $this->check('o2switch_database', InfrastructurePreflightState::NOT_CONFIGURED, 'o2switch_database_host_missing'),
             $this->check('o2switch_git', InfrastructurePreflightState::NOT_CONFIGURED, 'o2switch_git_host_missing'),
             $this->check('o2switch_fileman', InfrastructurePreflightState::NOT_CONFIGURED, 'o2switch_fileman_host_missing'),
@@ -114,6 +115,7 @@ class InfrastructurePreflightReadinessProofBridgeTest extends TestCase
     {
         $checks = [
             $this->check('cloudflare_dns', InfrastructurePreflightState::READY, 'cloudflare_dns_ready'),
+            $this->check('o2switch_account', InfrastructurePreflightState::READY, 'o2switch_account_ready'),
             $this->check('o2switch_database', InfrastructurePreflightState::READY, 'o2switch_database_ready'),
             $this->check('o2switch_git', InfrastructurePreflightState::READY, 'o2switch_git_ready'),
             $this->check('o2switch_fileman', InfrastructurePreflightState::READY, 'o2switch_fileman_ready'),
@@ -209,6 +211,7 @@ class InfrastructurePreflightReadinessProofBridgeTest extends TestCase
     {
         $checks = [
             $this->check('cloudflare_dns', InfrastructurePreflightState::READY, 'cloudflare_dns_ready'),
+            $this->check('o2switch_account', InfrastructurePreflightState::READY, 'o2switch_account_ready'),
             $this->check('o2switch_database', InfrastructurePreflightState::READY, 'o2switch_database_ready'),
             $this->check('o2switch_git', InfrastructurePreflightState::READY, 'o2switch_git_ready'),
             $this->check('o2switch_fileman', InfrastructurePreflightState::READY, 'o2switch_fileman_ready'),

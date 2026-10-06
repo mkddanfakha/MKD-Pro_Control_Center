@@ -4,11 +4,13 @@ namespace Tests\Unit\Services\Provisioning;
 
 use App\DTO\Provisioning\InfrastructurePreflightState;
 use App\Services\Provisioning\Infrastructure\Preflight\CloudflareDnsPreflightCheck;
+use App\Services\Provisioning\Infrastructure\Preflight\O2SwitchAccountPreflightCheck;
 use App\Services\Provisioning\Infrastructure\Preflight\O2SwitchDatabasePreflightCheck;
 use App\Services\Provisioning\Infrastructure\Preflight\O2SwitchFilemanPreflightCheck;
 use App\Services\Provisioning\Infrastructure\Preflight\O2SwitchGitPreflightCheck;
 use App\Services\Provisioning\Infrastructure\Preflight\O2SwitchSshPreflightCheck;
 use App\Services\Provisioning\ProvisioningInfrastructurePreflight;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -95,6 +97,91 @@ class InfrastructurePreflightTest extends TestCase
         $result = (new CloudflareDnsPreflightCheck)->run();
 
         $this->assertSame(InfrastructurePreflightState::FAILED, $result->state);
+    }
+
+    public function test_cpanel_account_not_configured_without_host(): void
+    {
+        config()->set('provisioning.secrets.o2switch_api_token', self::FAKE_CPANEL_TOKEN);
+        config()->set('provisioning.secrets.o2switch_cpanel_username', 'cpuser');
+        config()->set('provisioning.o2switch.database.cpanel_host', '');
+
+        $result = (new O2SwitchAccountPreflightCheck)->run();
+
+        $this->assertSame(InfrastructurePreflightState::NOT_CONFIGURED, $result->state);
+    }
+
+    public function test_cpanel_account_not_configured_without_credentials(): void
+    {
+        config()->set('provisioning.secrets.o2switch_api_token', '');
+        config()->set('provisioning.o2switch.database.cpanel_host', 'panel.example.test');
+
+        $result = (new O2SwitchAccountPreflightCheck)->run();
+
+        $this->assertSame(InfrastructurePreflightState::NOT_CONFIGURED, $result->state);
+    }
+
+    public function test_cpanel_account_ready_on_get_user_information_200(): void
+    {
+        $this->configureO2SwitchDatabasePreflight();
+
+        Http::fake([
+            '*2083/execute/Variables/get_user_information*' => Http::response([
+                'result' => [
+                    'status' => 1,
+                    'data' => ['user' => 'cpuser', 'homedir' => '/home/cpuser'],
+                ],
+            ], 200),
+        ]);
+
+        $result = (new O2SwitchAccountPreflightCheck)->run();
+
+        $this->assertSame(InfrastructurePreflightState::READY, $result->state);
+        $this->assertTrue($result->configuredAndReachable);
+        $this->assertSame('cpuser', $result->diagnostics['user'] ?? null);
+    }
+
+    public function test_cpanel_account_authentication_failed_on_401(): void
+    {
+        $this->configureO2SwitchDatabasePreflight();
+
+        Http::fake([
+            '*2083/execute/Variables/get_user_information*' => Http::response([], 401),
+        ]);
+
+        $result = (new O2SwitchAccountPreflightCheck)->run();
+
+        $this->assertSame(InfrastructurePreflightState::AUTHENTICATION_FAILED, $result->state);
+    }
+
+    public function test_cpanel_account_unreachable_on_connection_failure(): void
+    {
+        $this->configureO2SwitchDatabasePreflight();
+
+        Http::fake(function (): never {
+            throw new ConnectionException('Connection timed out');
+        });
+
+        $result = (new O2SwitchAccountPreflightCheck)->run();
+
+        $this->assertSame(InfrastructurePreflightState::UNREACHABLE, $result->state);
+    }
+
+    public function test_cpanel_account_preflight_uses_get_only(): void
+    {
+        $this->configureO2SwitchDatabasePreflight();
+
+        Http::fake([
+            '*2083/execute/Variables/get_user_information*' => Http::response([
+                'result' => ['status' => 1, 'data' => ['user' => 'cpuser']],
+            ], 200),
+        ]);
+
+        (new O2SwitchAccountPreflightCheck)->run();
+
+        Http::assertSent(function ($request) {
+            return $request->method() === 'GET'
+                && str_contains($request->url(), '/execute/Variables/get_user_information');
+        });
     }
 
     public function test_cpanel_database_ready_on_list_databases_200(): void
@@ -225,6 +312,9 @@ class InfrastructurePreflightTest extends TestCase
         Http::fake([
             'api.cloudflare.com/client/v4/zones/zone-test-id' => Http::response(['success' => true, 'result' => ['id' => 'zone-test-id']], 200),
             'api.cloudflare.com/client/v4/zones/zone-test-id/dns_records*' => Http::response(['success' => true, 'result' => []], 200),
+            '*2083/execute/Variables/get_user_information*' => Http::response([
+                'result' => ['status' => 1, 'data' => ['user' => 'cpuser']],
+            ], 200),
             '*2083/execute/Mysql/list_databases*' => Http::response(['result' => ['data' => []]], 200),
             '*2083/execute/Git/retrieve*' => Http::response(['result' => ['data' => []]], 200),
             '*2083/execute/Fileman/get_file_content*' => Http::response(['result' => ['data' => '']], 200),
@@ -242,6 +332,9 @@ class InfrastructurePreflightTest extends TestCase
         Http::fake([
             'api.cloudflare.com/client/v4/zones/zone-test-id' => Http::response(['success' => true, 'result' => ['id' => 'zone-test-id']], 200),
             'api.cloudflare.com/client/v4/zones/zone-test-id/dns_records*' => Http::response(['success' => true, 'result' => []], 200),
+            '*2083/execute/Variables/get_user_information*' => Http::response([
+                'result' => ['status' => 1, 'data' => ['user' => 'cpuser']],
+            ], 200),
             '*2083/execute/Mysql/list_databases*' => Http::response(['result' => ['data' => []]], 200),
             '*2083/execute/Git/retrieve*' => Http::response(['result' => ['data' => []]], 200),
             '*2083/execute/Fileman/get_file_content*' => Http::response(['result' => ['data' => '']], 200),
@@ -299,6 +392,9 @@ class InfrastructurePreflightTest extends TestCase
         Http::fake([
             'api.cloudflare.com/client/v4/zones/zone-test-id' => Http::response(['success' => true, 'result' => ['id' => 'zone-test-id']], 200),
             'api.cloudflare.com/client/v4/zones/zone-test-id/dns_records*' => Http::response(['success' => true, 'result' => []], 200),
+            '*2083/execute/Variables/get_user_information*' => Http::response([
+                'result' => ['status' => 1, 'data' => ['user' => 'cpuser']],
+            ], 200),
             '*2083/execute/Mysql/list_databases*' => Http::response(['result' => ['data' => []]], 200),
             '*2083/execute/Fileman/get_file_content*' => Http::response(['result' => ['data' => '']], 200),
         ]);

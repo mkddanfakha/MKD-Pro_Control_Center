@@ -59,6 +59,7 @@ use App\Contracts\Provisioning\Infrastructure\O2Switch\O2SwitchStorageGateway;
 use App\Services\Provisioning\Infrastructure\O2Switch\Storage\NullO2SwitchStorageGateway;
 use App\Services\Provisioning\Infrastructure\O2Switch\Storage\O2SwitchStorageAdapter;
 use App\Services\Provisioning\Infrastructure\Preflight\CloudflareDnsPreflightCheck;
+use App\Services\Provisioning\Infrastructure\Preflight\O2SwitchAccountPreflightCheck;
 use App\Services\Provisioning\Infrastructure\Preflight\O2SwitchDatabasePreflightCheck;
 use App\Services\Provisioning\Infrastructure\Preflight\O2SwitchFilemanPreflightCheck;
 use App\Services\Provisioning\Infrastructure\Preflight\O2SwitchGitPreflightCheck;
@@ -91,6 +92,7 @@ class ProvisioningServiceProvider extends ServiceProvider
         $this->app->singleton(ProvisioningInfrastructurePreflight::class, function (): ProvisioningInfrastructurePreflight {
             return new ProvisioningInfrastructurePreflight([
                 new CloudflareDnsPreflightCheck,
+                new O2SwitchAccountPreflightCheck,
                 new O2SwitchDatabasePreflightCheck,
                 new O2SwitchGitPreflightCheck,
                 new O2SwitchFilemanPreflightCheck,
